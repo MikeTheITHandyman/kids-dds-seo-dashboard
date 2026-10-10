@@ -89,13 +89,12 @@ export async function fetchTopQueries(siteUrl: string, startDate: string, endDat
         startDate,
         endDate,
         dimensions: ['query'],
-        rowLimit: 5,
-        orderBy: [{ fieldName: 'clicks', sortOrder: 'DESCENDING' }]
+        rowLimit: 5
       },
     });
 
     const rows = res.data.rows || [];
-    const queries = rows.map(row => ({
+    const queries = rows.map((row: any) => ({
       query: row.keys?.[0] || '',
       clicks: row.clicks || 0,
       impressions: row.impressions || 0,

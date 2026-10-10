@@ -164,7 +164,7 @@ export default async function SearchVisibility({
               {queryResult.queries.length === 0 ? (
                 <tr><td colSpan={5} className="px-6 py-4 text-center text-slate-500">Not enough data yet from Google Search Console. Check back in a few days.</td></tr>
               ) : (
-                queryResult.queries.map((row, i) => {
+                queryResult.queries.map((row: any, i: number) => {
                   const isTarget = row.query.toLowerCase().includes('pediatric dentist grayslake') || row.query.toLowerCase().includes('kids dentist grayslake');
                   return (
                   <tr key={i} className={`border-b border-slate-100 hover:bg-slate-50 ${isTarget ? 'bg-indigo-50/50' : 'bg-white'}`}>

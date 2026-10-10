@@ -13,7 +13,7 @@ const GA4_PROPERTY_ID = '554533089';
 export default async function WebAnalytics({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string }>;
+  searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string; compare?: string }>;
 }) {
   const resolvedParams = await searchParams;
   const range = resolvedParams.range || '30D';
