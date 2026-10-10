@@ -32,6 +32,22 @@ export default async function SearchVisibility({
     d.setDate(d.getDate() - day);
     startDate = d.toISOString().split('T')[0];
     endDate = today.toISOString().split('T')[0];
+  } else if (range === 'LW') {
+    const d = new Date(today);
+    const day = d.getDay();
+    d.setDate(d.getDate() - day - 7);
+    startDate = d.toISOString().split('T')[0];
+    const end = new Date(d);
+    end.setDate(end.getDate() + 6);
+    endDate = end.toISOString().split('T')[0];
+  } else if (range === 'LW') {
+    const d = new Date(today);
+    const day = d.getDay();
+    d.setDate(d.getDate() - day - 7);
+    startDate = d.toISOString().split('T')[0];
+    const end = new Date(d);
+    end.setDate(end.getDate() + 6);
+    endDate = end.toISOString().split('T')[0];
   } else if (range === 'TM') {
     const month = (today.getMonth() + 1).toString().padStart(2, '0');
     startDate = `${today.getFullYear()}-${month}-01`;
@@ -83,6 +99,7 @@ export default async function SearchVisibility({
     let days = 30;
     if (range === 'TM') days = today.getDate();
     else if (range === 'TW') days = today.getDay() + 1;
+    else if (range === 'LW') days = 7;
     else if (range === 'LM') days = new Date(today.getFullYear(), today.getMonth(), 0).getDate();
     
     gscData = Array.from({ length: Math.max(days, 1) }).map((_, i) => {

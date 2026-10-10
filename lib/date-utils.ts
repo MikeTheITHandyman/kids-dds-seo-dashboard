@@ -15,6 +15,14 @@ export function getPreviousPeriod(range: string, currentDate: Date = new Date())
     const end = new Date(d);
     end.setDate(end.getDate() + 6); // Last Saturday
     prevEnd = end.toISOString().split('T')[0];
+  } else if (range === 'LW') {
+    const day = d.getDay();
+    d.setDate(d.getDate() - day - 14); // 2 Sundays ago
+    prevStart = d.toISOString().split('T')[0];
+    
+    const end = new Date(d);
+    end.setDate(end.getDate() + 6); // 2 Saturdays ago
+    prevEnd = end.toISOString().split('T')[0];
   } else if (range === '30D' || !range) {
     const start = new Date(currentDate);
     start.setDate(start.getDate() - 60);

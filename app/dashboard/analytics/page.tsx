@@ -33,6 +33,22 @@ export default async function WebAnalytics({
     d.setDate(d.getDate() - day);
     startDate = d.toISOString().split('T')[0];
     endDate = today.toISOString().split('T')[0];
+  } else if (range === 'LW') {
+    const d = new Date(today);
+    const day = d.getDay();
+    d.setDate(d.getDate() - day - 7);
+    startDate = d.toISOString().split('T')[0];
+    const end = new Date(d);
+    end.setDate(end.getDate() + 6);
+    endDate = end.toISOString().split('T')[0];
+  } else if (range === 'LW') {
+    const d = new Date(today);
+    const day = d.getDay();
+    d.setDate(d.getDate() - day - 7);
+    startDate = d.toISOString().split('T')[0];
+    const end = new Date(d);
+    end.setDate(end.getDate() + 6);
+    endDate = end.toISOString().split('T')[0];
   } else if (range === 'TM') {
     const month = (today.getMonth() + 1).toString().padStart(2, '0');
     startDate = `${today.getFullYear()}-${month}-01`;

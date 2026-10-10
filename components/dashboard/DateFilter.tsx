@@ -55,6 +55,7 @@ export default function DateFilter() {
         >
           <option value="1D">Today (1 Day)</option>
           <option value="TW">This Week</option>
+          <option value="LW">Last Week</option>
           <option value="30D">Last 30 Days</option>
           <option value="TM">This Month</option>
           <option value="LM">Last Month</option>
