@@ -1,0 +1,12 @@
+name: Nightly LLM Tracker
+on:
+  schedule:
+    - cron: "0 8 * * *"
+  workflow_dispatch: # Allows manual triggering
+jobs:
+  ping-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping LLM Tracker API
+        run: |
+          curl -X GET "https://kidsddsseo.netlify.app/api/cron/llm-tracker" -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
