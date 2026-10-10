@@ -121,6 +121,9 @@ export async function GET(request: Request) {
   const shuffledCommunities = [...COMMUNITIES].sort(() => 0.5 - Math.random());
   const selectedCommunities = shuffledCommunities.slice(0, 2);
 
+  const startTime = new Date();
+  const runLog: any[] = [];
+
   let chatgptSuccesses = 0;
   let claudeSuccesses = 0;
   let geminiSuccesses = 0;
@@ -136,11 +139,30 @@ export async function GET(request: Request) {
         queryGemini(prompt)
       ]);
 
-      if (checkBrandMention(gptResponse)) chatgptSuccesses++;
-      if (checkBrandMention(claudeResponse)) claudeSuccesses++;
-      if (checkBrandMention(geminiResponse)) geminiSuccesses++;
+      const gptMention = checkBrandMention(gptResponse);
+      const claudeMention = checkBrandMention(claudeResponse);
+      const geminiMention = checkBrandMention(geminiResponse);
+
+      if (gptMention) chatgptSuccesses++;
+      if (claudeMention) claudeSuccesses++;
+      if (geminiMention) geminiSuccesses++;
+
+      runLog.push({
+        location,
+        topic: topic.type,
+        prompt,
+        chatgptResponse: gptResponse,
+        chatgptMentioned: gptMention,
+        claudeResponse: claudeResponse,
+        claudeMentioned: claudeMention,
+        geminiResponse: geminiResponse,
+        geminiMentioned: geminiMention
+      });
     }
   }
+
+  const endTime = new Date();
+  const durationMs = endTime.getTime() - startTime.getTime();
 
   const chatgptScore = Math.round((chatgptSuccesses / totalPrompts) * 100);
   const claudeScore = Math.round((claudeSuccesses / totalPrompts) * 100);
@@ -151,6 +173,20 @@ export async function GET(request: Request) {
   // Save to Firebase
   if (adminDb && adminDb.collection) {
     try {
+      // 1. Save detailed log of exactly what was asked and answered
+      await adminDb.collection('cron_logs').add({
+        date: dateStr,
+        startTime: startTime,
+        endTime: endTime,
+        durationMs,
+        communities_tested: selectedCommunities,
+        chatgpt_score: chatgptScore,
+        claude_score: claudeScore,
+        gemini_score: geminiScore,
+        logs: runLog
+      });
+
+      // 2. Save high-level daily score snapshot for the charts
       await adminDb.collection('llm_visibility').doc(dateStr).set({
         date: dateStr,
         chatgpt_score: chatgptScore,
