@@ -192,7 +192,7 @@ export default async function LLMVisibility({
         .limit(20)
         .get();
       
-      cronRunLogs = logsSnap.docs.map(doc => {
+      cronRunLogs = logsSnap.docs.map((doc: any) => {
         const d = doc.data();
         return {
           id: doc.id,
