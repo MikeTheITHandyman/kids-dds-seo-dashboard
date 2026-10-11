@@ -109,13 +109,15 @@ export async function GET(request: Request) {
 
     // Track metrics
     const engineSuccesses: Record<string, number> = {};
+    const engineFailures: Record<string, number> = {};
     const engineTotals: Record<string, number> = {};
     activeEngines.forEach(e => {
       engineSuccesses[e.name] = 0;
+      engineFailures[e.name] = 0;
       engineTotals[e.name] = 0;
     });
 
-    // Execute tasks CONCURRENTLY across all engines to finish within serverless timeouts (typically < 10s)
+    // Execute tasks CONCURRENTLY across all engines to finish within serverless timeouts (typically < 15s)
     const taskResults = await Promise.all(
       tasks.map(async (task, taskIdx) => {
         const taskLog: any = {
@@ -131,13 +133,13 @@ export async function GET(request: Request) {
           activeEngines.map(async (engine) => {
             // Slight stagger for Gemini rate-limits
             if (engine.name === 'Gemini' && taskIdx > 0) {
-              await new Promise(r => setTimeout(r, (taskIdx % 4) * 250));
+              await new Promise(r => setTimeout(r, (taskIdx % 4) * 200));
             }
 
             let queryResult;
             try {
-              // 12s per-call timeout
-              queryResult = await engine.query(task.prompt, 12000);
+              // 18s per-call timeout
+              queryResult = await engine.query(task.prompt, 18000);
             } catch (err: any) {
               queryResult = {
                 engine: engine.name,
@@ -153,9 +155,9 @@ export async function GET(request: Request) {
             const responseText = queryResult.responseText || '';
             const status = queryResult.status;
 
+            engineTotals[engine.name] = (engineTotals[engine.name] || 0) + 1;
             if (status === 'api_error' || status === 'timeout') {
-              const errAlert = `${engine.name} (${queryResult.model}): ${queryResult.errorMessage || status}`;
-              if (!criticalErrors.includes(errAlert)) criticalErrors.push(errAlert);
+              engineFailures[engine.name] = (engineFailures[engine.name] || 0) + 1;
             }
 
             const detection = detectBrandMention(responseText);
@@ -164,7 +166,6 @@ export async function GET(request: Request) {
             if (detection.isMentioned) {
               engineSuccesses[engine.name] = (engineSuccesses[engine.name] || 0) + 1;
             }
-            engineTotals[engine.name] = (engineTotals[engine.name] || 0) + 1;
 
             const row: HarnessRow = {
               run_date: dateStr,
@@ -230,6 +231,15 @@ export async function GET(request: Request) {
     const claudeScore = engineTotals['Claude'] ? Math.round(((engineSuccesses['Claude'] || 0) / engineTotals['Claude']) * 100) : 0;
     const geminiScore = engineTotals['Gemini'] ? Math.round(((engineSuccesses['Gemini'] || 0) / engineTotals['Gemini']) * 100) : 0;
     const perplexityScore = engineTotals['Perplexity'] ? Math.round(((engineSuccesses['Perplexity'] || 0) / engineTotals['Perplexity']) * 100) : 0;
+
+    // Check failure rates per engine: only report critical error if > 20% fail
+    for (const [engName, failedCount] of Object.entries(engineFailures)) {
+      const totalCount = engineTotals[engName] || 1;
+      const failRatio = failedCount / totalCount;
+      if (failRatio > 0.20) {
+        criticalErrors.push(`${engName}: ${failedCount}/${totalCount} calls failed (${Math.round(failRatio * 100)}% > 20% threshold)`);
+      }
+    }
 
     saveRunOutputs(dateStr, runRows);
 
