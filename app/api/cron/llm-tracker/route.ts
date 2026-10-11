@@ -53,10 +53,11 @@ const OPENAI_MODELS = [
 
 const CLAUDE_MODELS = [
   process.env.ANTHROPIC_MODEL,
-  "claude-3-5-sonnet-20241022",
-  "claude-3-5-sonnet-latest",
   "claude-3-5-haiku-20241022",
   "claude-3-5-haiku-latest",
+  "claude-3-7-sonnet-latest",
+  "claude-3-5-sonnet-20241022",
+  "claude-3-5-sonnet-latest",
   "claude-3-haiku-20240307"
 ].filter(Boolean) as string[];
 
@@ -176,7 +177,12 @@ async function queryGemini(prompt: string, delayMs: number = 0) {
         },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 350 }
+          generationConfig: {
+            maxOutputTokens: 800,
+            thinkingConfig: {
+              thinkingBudget: 0
+            }
+          }
         }),
         signal: AbortSignal.timeout(9000)
       });
