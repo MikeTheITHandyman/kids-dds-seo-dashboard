@@ -34,9 +34,10 @@ const OPENAI_MODELS = [
 
 const CLAUDE_MODELS = [
   process.env.ANTHROPIC_MODEL,
-  "claude-3-5-sonnet-latest",
   "claude-3-5-sonnet-20241022",
-  "claude-3-5-sonnet-20240620",
+  "claude-3-5-sonnet-latest",
+  "claude-3-5-haiku-20241022",
+  "claude-3-5-haiku-latest",
   "claude-3-haiku-20240307"
 ].filter(Boolean) as string[];
 
@@ -45,8 +46,7 @@ const GEMINI_MODELS = [
   "gemini-3.8-flash",
   "gemini-flash-latest",
   "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash"
+  "gemini-2.0-flash"
 ].filter(Boolean) as string[];
 
 // Helper to query OpenAI with automatic model fallbacks
@@ -177,9 +177,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // To save on API costs, we will randomly select 2 communities to test each night
+  // To save on API costs and stay strictly within Gemini's free tier (5 RPM), test 1 community each night
   const shuffledCommunities = [...COMMUNITIES].sort(() => 0.5 - Math.random());
-  const selectedCommunities = shuffledCommunities.slice(0, 2);
+  const selectedCommunities = shuffledCommunities.slice(0, 1);
 
   const startTime = new Date();
   const runLog: any[] = [];
