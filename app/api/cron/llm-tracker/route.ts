@@ -63,8 +63,10 @@ async function queryOpenAI(prompt: string) {
         },
         body: JSON.stringify({
           model,
+          max_tokens: 350,
           messages: [{ role: "user", content: prompt }]
-        })
+        }),
+        signal: AbortSignal.timeout(9000)
       });
       const data = await res.json();
       if (data.choices?.[0]?.message?.content) {
@@ -72,7 +74,6 @@ async function queryOpenAI(prompt: string) {
       }
       if (data.error) {
         lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
-        // If it's a quota/billing error, fallbacks won't help, so exit early
         if (data.error.code === 'insufficient_quota' || data.error.type === 'insufficient_quota') {
           return lastError;
         }
@@ -100,9 +101,10 @@ async function queryClaude(prompt: string) {
         },
         body: JSON.stringify({
           model,
-          max_tokens: 1024,
+          max_tokens: 350,
           messages: [{ role: "user", content: prompt }]
-        })
+        }),
+        signal: AbortSignal.timeout(9000)
       });
       const data = await res.json();
       if (data.content?.[0]?.text) {
@@ -110,7 +112,6 @@ async function queryClaude(prompt: string) {
       }
       if (data.error) {
         lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
-        // If it's a workspace or auth issue, break early
         if (data.error.type === 'authentication_error' || data.error.type === 'permission_error') {
           return lastError;
         }
@@ -135,8 +136,10 @@ async function queryGemini(prompt: string) {
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 350 }
+        }),
+        signal: AbortSignal.timeout(9000)
       });
       const data = await res.json();
       if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
