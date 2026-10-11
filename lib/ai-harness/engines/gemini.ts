@@ -16,21 +16,15 @@ export const geminiEngine: EngineClient = {
     }
 
     try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${DEFAULT_MODEL}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Ping test' }] }],
-          generationConfig: { maxOutputTokens: 10, thinkingConfig: { thinkingBudget: 0 } }
-        }),
-        signal: AbortSignal.timeout(15000)
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${process.env.GEMINI_API_KEY}`, {
+        signal: AbortSignal.timeout(6000)
       });
 
       const data = await res.json();
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+      if (data.models && Array.isArray(data.models)) {
         return { ok: true, model: DEFAULT_MODEL };
       }
-      return { ok: false, model: DEFAULT_MODEL, error: data.error?.message || 'Invalid response' };
+      return { ok: false, model: DEFAULT_MODEL, error: data.error?.message || 'Invalid API key or model response' };
     } catch (e: any) {
       return { ok: false, model: DEFAULT_MODEL, error: e.message };
     }
