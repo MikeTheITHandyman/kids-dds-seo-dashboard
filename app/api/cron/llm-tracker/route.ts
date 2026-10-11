@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 
-// The communities we want to test LLM visibility for
-const COMMUNITIES = [
-  "Lake County, IL",
+// Core communities always tested on every run
+const CORE_COMMUNITIES = [
   "Grayslake",
-  "Waukegan",
+  "Lake County, IL"
+];
+
+// Rotating communities (one tested per run)
+const ROTATING_COMMUNITIES = [
   "Lake Villa",
   "Libertyville",
   "Vernon Hills",
+  "Waukegan",
   "Lake Forest",
   "Highwood",
   "Highland Park",
@@ -58,8 +62,8 @@ const CLAUDE_MODELS = [
 
 const GEMINI_MODELS = [
   process.env.GEMINI_MODEL,
-  "gemini-3.8-flash",
   "gemini-flash-latest",
+  "gemini-3.8-flash",
   "gemini-2.5-flash",
   "gemini-2.0-flash"
 ].filter(Boolean) as string[];
@@ -109,13 +113,18 @@ async function queryClaude(prompt: string) {
   for (let i = 0; i < CLAUDE_MODELS.length; i++) {
     const model = CLAUDE_MODELS[i];
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01"
+      };
+      if (process.env.ANTHROPIC_WORKSPACE_ID) {
+        headers["anthropic-workspace-id"] = process.env.ANTHROPIC_WORKSPACE_ID;
+      }
+
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": process.env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01"
-        },
+        headers,
         body: JSON.stringify({
           model,
           max_tokens: 350,
@@ -223,9 +232,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // To save on API costs and stay strictly within Gemini's free tier (5 RPM), test 1 community each night
-  const shuffledCommunities = [...COMMUNITIES].sort(() => 0.5 - Math.random());
-  const selectedCommunities = shuffledCommunities.slice(0, 1);
+  // Option A Plus: Always test Core communities (Grayslake, Lake County, IL) plus 1 rotating neighbor town
+  const shuffledRotating = [...ROTATING_COMMUNITIES].sort(() => 0.5 - Math.random());
+  const selectedCommunities = [...CORE_COMMUNITIES, shuffledRotating[0]];
 
   const startTime = new Date();
   const runLog: any[] = [];
@@ -247,13 +256,13 @@ export async function GET(request: Request) {
     }
   }
 
-  // Execute all prompts concurrently (Gemini calls are staggered by 1s to prevent free-tier 429 limits)
+  // Execute prompts concurrently with gentle staggering on Gemini
   const results = await Promise.all(
     tasks.map(async (task, idx) => {
       const [gptResponse, claudeResponse, geminiResponse] = await Promise.all([
         queryOpenAI(task.prompt),
         queryClaude(task.prompt),
-        queryGemini(task.prompt, idx * 1000)
+        queryGemini(task.prompt, (idx % 5) * 400)
       ]);
 
       const gptMention = checkBrandMention(gptResponse);
