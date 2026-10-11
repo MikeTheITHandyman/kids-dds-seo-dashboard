@@ -26,7 +26,7 @@ const TOPICS = [
 
 // Helper to query OpenAI
 async function queryOpenAI(prompt: string) {
-  if (!process.env.OPENAI_API_KEY) return "";
+  if (!process.env.OPENAI_API_KEY) return "[ERROR: Missing OPENAI_API_KEY in Netlify]";
   
   try {
     const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -41,16 +41,16 @@ async function queryOpenAI(prompt: string) {
       })
     });
     const data = await res.json();
+    if (data.error) return `[API ERROR: ${data.error.message || JSON.stringify(data.error)}]`;
     return data.choices?.[0]?.message?.content || "";
-  } catch (e) {
-    console.error("OpenAI Error:", e);
-    return "";
+  } catch (e: any) {
+    return `[FETCH ERROR: ${e.message}]`;
   }
 }
 
 // Helper to query Claude
 async function queryClaude(prompt: string) {
-  if (!process.env.ANTHROPIC_API_KEY) return "";
+  if (!process.env.ANTHROPIC_API_KEY) return "[ERROR: Missing ANTHROPIC_API_KEY in Netlify]";
   
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -67,16 +67,16 @@ async function queryClaude(prompt: string) {
       })
     });
     const data = await res.json();
+    if (data.error) return `[API ERROR: ${data.error.message || JSON.stringify(data.error)}]`;
     return data.content?.[0]?.text || "";
-  } catch (e) {
-    console.error("Claude Error:", e);
-    return "";
+  } catch (e: any) {
+    return `[FETCH ERROR: ${e.message}]`;
   }
 }
 
 // Helper to query Gemini
 async function queryGemini(prompt: string) {
-  if (!process.env.GEMINI_API_KEY) return "";
+  if (!process.env.GEMINI_API_KEY) return "[ERROR: Missing GEMINI_API_KEY in Netlify]";
   
   try {
     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -89,10 +89,10 @@ async function queryGemini(prompt: string) {
       })
     });
     const data = await res.json();
+    if (data.error) return `[API ERROR: ${data.error.message || JSON.stringify(data.error)}]`;
     return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  } catch (e) {
-    console.error("Gemini Error:", e);
-    return "";
+  } catch (e: any) {
+    return `[FETCH ERROR: ${e.message}]`;
   }
 }
 
