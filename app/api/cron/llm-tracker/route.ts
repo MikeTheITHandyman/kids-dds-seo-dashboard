@@ -287,7 +287,15 @@ export async function GET(request: Request) {
           lower.includes('permission') ||
           lower.includes('missing')
         ) {
-          const clean = `${name}: ${resp.replace(/^\[(API|FETCH|ERROR)[^:]*:\s*/i, '').replace(/\]$/, '')}`;
+          let cleanMsg = resp.replace(/^\[(API|FETCH|ERROR)[^:]*:\s*/i, '').replace(/\]$/, '');
+          // Strip out dynamic timestamps and verbose URLs so all 5 prompts collapse into a single clean message
+          if (cleanMsg.includes('For more information')) {
+            cleanMsg = cleanMsg.split('. For more information')[0];
+          }
+          if (cleanMsg.toLowerCase().includes('quota exceeded')) {
+            cleanMsg = 'Daily rate limit / quota exceeded on current plan.';
+          }
+          const clean = `${name}: ${cleanMsg.trim()}`;
           if (!criticalErrors.includes(clean)) {
             criticalErrors.push(clean);
           }
