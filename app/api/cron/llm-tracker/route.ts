@@ -90,8 +90,9 @@ async function queryOpenAI(prompt: string) {
 async function queryClaude(prompt: string) {
   if (!process.env.ANTHROPIC_API_KEY) return "[ERROR: Missing ANTHROPIC_API_KEY in Netlify]";
   
-  let lastError = "";
-  for (const model of CLAUDE_MODELS) {
+  let primaryError = "";
+  for (let i = 0; i < CLAUDE_MODELS.length; i++) {
+    const model = CLAUDE_MODELS[i];
     try {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -112,16 +113,27 @@ async function queryClaude(prompt: string) {
         return data.content[0].text;
       }
       if (data.error) {
-        lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
-        if (data.error.type === 'authentication_error' || data.error.type === 'permission_error') {
-          return lastError;
+        const msg = data.error.message || JSON.stringify(data.error);
+        const errStr = `[API ERROR (${model}): ${msg}]`;
+        if (i === 0) primaryError = errStr;
+        
+        // If it's a balance, credit, billing, or permission issue, fallbacks will also fail
+        const lower = msg.toLowerCase();
+        if (
+          lower.includes('credit') ||
+          lower.includes('balance') ||
+          lower.includes('billing') ||
+          data.error.type === 'authentication_error' ||
+          data.error.type === 'permission_error'
+        ) {
+          return errStr;
         }
       }
     } catch (e: any) {
-      lastError = `[FETCH ERROR (${model}): ${e.message}]`;
+      if (i === 0) primaryError = `[FETCH ERROR (${model}): ${e.message}]`;
     }
   }
-  return lastError || "[ERROR: All Claude models failed]";
+  return primaryError || "[ERROR: All Claude models failed]";
 }
 
 // Helper to query Gemini with automatic model fallbacks and optional rate-limit delay
@@ -129,8 +141,9 @@ async function queryGemini(prompt: string, delayMs: number = 0) {
   if (!process.env.GEMINI_API_KEY) return "[ERROR: Missing GEMINI_API_KEY in Netlify]";
   if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
 
-  let lastError = "";
-  for (const model of GEMINI_MODELS) {
+  let primaryError = "";
+  for (let i = 0; i < GEMINI_MODELS.length; i++) {
+    const model = GEMINI_MODELS[i];
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
         method: "POST",
@@ -148,13 +161,20 @@ async function queryGemini(prompt: string, delayMs: number = 0) {
         return data.candidates[0].content.parts[0].text;
       }
       if (data.error) {
-        lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
+        const msg = data.error.message || JSON.stringify(data.error);
+        const errStr = `[API ERROR (${model}): ${msg}]`;
+        if (i === 0) primaryError = errStr;
+
+        // If it's a rate limit 429, fallbacks won't help
+        if (data.error.code === 429 || msg.toLowerCase().includes('quota')) {
+          return errStr;
+        }
       }
     } catch (e: any) {
-      lastError = `[FETCH ERROR (${model}): ${e.message}]`;
+      if (i === 0) primaryError = `[FETCH ERROR (${model}): ${e.message}]`;
     }
   }
-  return lastError || "[ERROR: All Gemini models failed]";
+  return primaryError || "[ERROR: All Gemini models failed]";
 }
 
 // Simple keyword matching for the brand
