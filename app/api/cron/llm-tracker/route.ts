@@ -53,11 +53,11 @@ const OPENAI_MODELS = [
 
 const CLAUDE_MODELS = [
   process.env.ANTHROPIC_MODEL,
+  "claude-haiku-4-5-20251001",
+  "claude-sonnet-4-5-20250929",
+  "claude-opus-4-5-20251101",
   "claude-3-5-haiku-20241022",
-  "claude-3-5-haiku-latest",
-  "claude-3-7-sonnet-latest",
   "claude-3-5-sonnet-20241022",
-  "claude-3-5-sonnet-latest",
   "claude-3-haiku-20240307"
 ].filter(Boolean) as string[];
 
