@@ -1,0 +1,32 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+build
+
+# Misc
+.DS_Store
+*.pem
+*.tsbuildinfo
+next-env.d.ts
+
+# Debug & local scratch files
+*.log
+test_*.js
+patch_*.js
+patch_*.py
+clear_alert.js
+inspect_err.js
+read_firestore_log.js
+
+# Local environment files
+.env*.local
+.env.local.txt
+.ai_harness.lock

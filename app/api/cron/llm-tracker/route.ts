@@ -1,5 +1,15 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { 
+  LOCATIONS, 
+  TOPIC_TEMPLATES, 
+  formatLocationString 
+} from '@/lib/ai-harness/config';
+import { detectBrandMention } from '@/lib/ai-harness/detector';
+import { analyzeCitations, classifyRefusal } from '@/lib/ai-harness/citations';
+import { runPreflightChecks } from '@/lib/ai-harness/preflight';
+import { acquireRunLock, releaseRunLock } from '@/lib/ai-harness/lock';
+import { HarnessRow, computeHash, saveRunOutputs } from '@/lib/ai-harness/export';
 
 // Core communities always tested on every run
 const CORE_COMMUNITIES = [
@@ -9,409 +19,261 @@ const CORE_COMMUNITIES = [
 
 // Rotating communities (one tested per run)
 const ROTATING_COMMUNITIES = [
+  "Round Lake Beach",
   "Lake Villa",
   "Libertyville",
-  "Vernon Hills",
   "Waukegan",
-  "Lake Forest",
-  "Highwood",
-  "Highland Park",
-  "Mundelein"
+  "Gurnee",
+  "Mundelein",
+  "Antioch",
+  "Round Lake",
+  "Lindenhurst",
+  "McHenry"
 ];
-
-// The core topics engineered to bypass AI refusal guardrails and elicit specific local practice names
-const TOPICS = [
-  { 
-    type: "Local", 
-    prompt: "What are some reputable, highly recommended pediatric dental practices serving families in or near {location}, IL? Please list specific clinics and pediatric dentists in Lake County." 
-  },
-  { 
-    type: "Emergency", 
-    prompt: "If a child in or near {location}, IL has a dental emergency (like a knocked out tooth), what pediatric dental offices in the area should parents contact? Please name specific clinics." 
-  },
-  { 
-    type: "QA_Guilt", 
-    prompt: "Which pediatric dental offices near {location}, IL are known for gentle, non-judgmental, and compassionate care for toddlers? Please provide specific practice names." 
-  },
-  { 
-    type: "QA_Treatment", 
-    prompt: "Can you recommend pediatric dentists near {location}, IL that specialize in children's preventative care and cavity treatments? Please name specific practices." 
-  },
-  { 
-    type: "QA_Sedation", 
-    prompt: "What pediatric dental practices in or near {location}, IL offer safe sedation or gentle dental care for anxious kids? Please list specific clinics." 
-  }
-];
-
-// Model fallback lists
-const OPENAI_MODELS = [
-  process.env.OPENAI_MODEL,
-  "gpt-4o",
-  "gpt-4o-mini",
-  "gpt-4-turbo"
-].filter(Boolean) as string[];
-
-const CLAUDE_MODELS = [
-  process.env.ANTHROPIC_MODEL,
-  "claude-haiku-4-5-20251001",
-  "claude-sonnet-4-5-20250929",
-  "claude-opus-4-5-20251101",
-  "claude-3-5-haiku-20241022",
-  "claude-3-5-sonnet-20241022",
-  "claude-3-haiku-20240307"
-].filter(Boolean) as string[];
-
-const GEMINI_MODELS = [
-  process.env.GEMINI_MODEL,
-  "gemini-flash-latest",
-  "gemini-3.8-flash",
-  "gemini-2.5-flash",
-  "gemini-2.0-flash"
-].filter(Boolean) as string[];
-
-// Helper to query OpenAI with automatic model fallbacks
-async function queryOpenAI(prompt: string) {
-  if (!process.env.OPENAI_API_KEY) return "[ERROR: Missing OPENAI_API_KEY in Netlify]";
-  
-  let lastError = "";
-  for (const model of OPENAI_MODELS) {
-    try {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 350,
-          messages: [{ role: "user", content: prompt }]
-        }),
-        signal: AbortSignal.timeout(9000)
-      });
-      const data = await res.json();
-      if (data.choices?.[0]?.message?.content) {
-        return data.choices[0].message.content;
-      }
-      if (data.error) {
-        lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
-        if (data.error.code === 'insufficient_quota' || data.error.type === 'insufficient_quota') {
-          return lastError;
-        }
-      }
-    } catch (e: any) {
-      lastError = `[FETCH ERROR (${model}): ${e.message}]`;
-    }
-  }
-  return lastError || "[ERROR: All OpenAI models failed]";
-}
-
-// Helper to query Claude with automatic model fallbacks
-async function queryClaude(prompt: string) {
-  if (!process.env.ANTHROPIC_API_KEY) return "[ERROR: Missing ANTHROPIC_API_KEY in Netlify]";
-  
-  let primaryError = "";
-  for (let i = 0; i < CLAUDE_MODELS.length; i++) {
-    const model = CLAUDE_MODELS[i];
-    try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01"
-      };
-      if (process.env.ANTHROPIC_WORKSPACE_ID) {
-        headers["anthropic-workspace-id"] = process.env.ANTHROPIC_WORKSPACE_ID;
-      }
-
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          model,
-          max_tokens: 350,
-          messages: [{ role: "user", content: prompt }]
-        }),
-        signal: AbortSignal.timeout(9000)
-      });
-      const data = await res.json();
-      if (data.content?.[0]?.text) {
-        return data.content[0].text;
-      }
-      if (data.error) {
-        const msg = data.error.message || JSON.stringify(data.error);
-        const errStr = `[API ERROR (${model}): ${msg}]`;
-        if (i === 0) primaryError = errStr;
-        
-        // If it's a balance, credit, billing, or permission issue, fallbacks will also fail
-        const lower = msg.toLowerCase();
-        if (
-          lower.includes('credit') ||
-          lower.includes('balance') ||
-          lower.includes('billing') ||
-          data.error.type === 'authentication_error' ||
-          data.error.type === 'permission_error'
-        ) {
-          return errStr;
-        }
-      }
-    } catch (e: any) {
-      if (i === 0) primaryError = `[FETCH ERROR (${model}): ${e.message}]`;
-    }
-  }
-  return primaryError || "[ERROR: All Claude models failed]";
-}
-
-// Helper to query Gemini with automatic model fallbacks and optional rate-limit delay
-async function queryGemini(prompt: string, delayMs: number = 0) {
-  if (!process.env.GEMINI_API_KEY) return "[ERROR: Missing GEMINI_API_KEY in Netlify]";
-  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
-
-  let primaryError = "";
-  for (let i = 0; i < GEMINI_MODELS.length; i++) {
-    const model = GEMINI_MODELS[i];
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            maxOutputTokens: 800,
-            thinkingConfig: {
-              thinkingBudget: 0
-            }
-          }
-        }),
-        signal: AbortSignal.timeout(9000)
-      });
-      const data = await res.json();
-      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-        return data.candidates[0].content.parts[0].text;
-      }
-      if (data.error) {
-        const msg = data.error.message || JSON.stringify(data.error);
-        const errStr = `[API ERROR (${model}): ${msg}]`;
-        if (i === 0) primaryError = errStr;
-
-        // If it's a rate limit 429, fallbacks won't help
-        if (data.error.code === 429 || msg.toLowerCase().includes('quota')) {
-          return errStr;
-        }
-      }
-    } catch (e: any) {
-      if (i === 0) primaryError = `[FETCH ERROR (${model}): ${e.message}]`;
-    }
-  }
-  return primaryError || "[ERROR: All Gemini models failed]";
-}
-
-// Simple keyword matching for the brand, practice, and doctors
-function checkBrandMention(response: string) {
-  const brandKeywords = [
-    "kids dds", 
-    "kidsdds", 
-    "kids dentist", 
-    "kidsdentist.com",
-    "kidsdds.com",
-    "dr. sonia",
-    "dr. gutierrez",
-    "dr. dave",
-    "dr. rutcosky",
-    "dr. sahar",
-    "dr. alrayyes",
-    "dr. compton",
-    "dr. kim",
-    "160 commerce",
-    "commerce dr"
-  ];
-  
-  const lowerResp = response.toLowerCase();
-  return brandKeywords.some(kw => lowerResp.includes(kw));
-}
 
 export async function GET(request: Request) {
-  // Validate authorization (cron secret) to prevent public triggering
+  // Validate authorization (cron secret) to prevent unauthorized triggering
   const authHeader = request.headers.get('authorization');
   if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Option A Plus: Always test Core communities (Grayslake, Lake County, IL) plus 1 rotating neighbor town
-  const shuffledRotating = [...ROTATING_COMMUNITIES].sort(() => 0.5 - Math.random());
-  const selectedCommunities = [...CORE_COMMUNITIES, shuffledRotating[0]];
+  const { searchParams } = new URL(request.url);
+  const isDryRun = searchParams.get('dryRun') === 'true';
+
+  // Acquire concurrency lock
+  const lock = await acquireRunLock();
+  if (!lock.acquired) {
+    return NextResponse.json({
+      error: 'Harness run currently active',
+      reason: lock.reason
+    }, { status: 429 });
+  }
 
   const startTime = new Date();
-  const runLog: any[] = [];
+  const dateStr = startTime.toISOString().split('T')[0];
 
-  let chatgptSuccesses = 0;
-  let claudeSuccesses = 0;
-  let geminiSuccesses = 0;
-  const totalPrompts = selectedCommunities.length * TOPICS.length;
+  try {
+    // 1. Preflight check
+    const preflight = await runPreflightChecks();
+    const activeEngines = preflight.activeEngines;
 
-  // Create tasks for all community + topic combinations
-  const tasks: { location: string; topic: string; prompt: string }[] = [];
-  for (const location of selectedCommunities) {
-    for (const topic of TOPICS) {
-      tasks.push({
-        location,
-        topic: topic.type,
-        prompt: topic.prompt.replace("{location}", location)
-      });
+    if (activeEngines.length === 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'No active AI search engines passed preflight',
+        abortedEngines: preflight.abortedEngines,
+        alertMessage: preflight.alertMessage
+      }, { status: 502 });
     }
-  }
 
-  // Execute prompts concurrently with gentle staggering on Gemini
-  const results = await Promise.all(
-    tasks.map(async (task, idx) => {
-      const [gptResponse, claudeResponse, geminiResponse] = await Promise.all([
-        queryOpenAI(task.prompt),
-        queryClaude(task.prompt),
-        queryGemini(task.prompt, (idx % 5) * 400)
-      ]);
+    // 2. Select communities
+    const shuffledRotating = [...ROTATING_COMMUNITIES].sort(() => 0.5 - Math.random());
+    const selectedCommunities = isDryRun 
+      ? ["Grayslake"] 
+      : [...CORE_COMMUNITIES, shuffledRotating[0]];
 
-      const gptMention = checkBrandMention(gptResponse);
-      const claudeMention = checkBrandMention(claudeResponse);
-      const geminiMention = checkBrandMention(geminiResponse);
+    // 3. Select topic templates (use first 5 for standard cron to stay within serverless execution bounds)
+    const templatesToTest = isDryRun 
+      ? TOPIC_TEMPLATES.slice(0, 2) 
+      : TOPIC_TEMPLATES.slice(0, 5);
 
-      return {
+    const tasks: { location: string; topicId: string; topicName: string; prompt: string }[] = [];
+    for (const locName of selectedCommunities) {
+      for (const t of templatesToTest) {
+        // Find matching LocationConfig or format cleanly
+        const locConfig = LOCATIONS.find(l => l.name.toLowerCase() === locName.toLowerCase()) || {
+          name: locName,
+          state: locName.includes("WI") ? "WI" : "IL",
+          tier: 'primary' as const
+        };
+        const formattedLoc = formatLocationString(locConfig);
+        const promptText = t.explicitTemplate.replace("{location}", formattedLoc);
+        tasks.push({
+          location: locName,
+          topicId: t.id,
+          topicName: t.topic,
+          prompt: promptText
+        });
+      }
+    }
+
+    const runRows: HarnessRow[] = [];
+    const dashboardLogs: any[] = [];
+    const criticalErrors: string[] = [];
+
+    if (preflight.alertMessage) {
+      criticalErrors.push(preflight.alertMessage);
+    }
+
+    // Engine metrics
+    const engineSuccesses: Record<string, number> = {};
+    const engineTotals: Record<string, number> = {};
+    activeEngines.forEach(e => {
+      engineSuccesses[e.name] = 0;
+      engineTotals[e.name] = 0;
+    });
+
+    // Execute queries
+    for (const task of tasks) {
+      const taskLog: any = {
         location: task.location,
-        topic: task.topic,
+        topic: task.topicName,
         prompt: task.prompt,
-        chatgptResponse: gptResponse,
-        chatgptMentioned: gptMention,
-        claudeResponse: claudeResponse,
-        claudeMentioned: claudeMention,
-        geminiResponse: geminiResponse,
-        geminiMentioned: geminiMention
+        engines: {}
       };
-    })
-  );
 
-  for (const r of results) {
-    if (r.chatgptMentioned) chatgptSuccesses++;
-    if (r.claudeMentioned) claudeSuccesses++;
-    if (r.geminiMentioned) geminiSuccesses++;
-    runLog.push(r);
-  }
+      for (const engine of activeEngines) {
+        engineTotals[engine.name] = (engineTotals[engine.name] || 0) + 1;
 
-  const endTime = new Date();
-  const durationMs = endTime.getTime() - startTime.getTime();
+        let queryResult;
+        try {
+          queryResult = await engine.query(task.prompt);
+        } catch (err: any) {
+          queryResult = {
+            engine: engine.name,
+            model: 'unknown',
+            status: 'api_error' as const,
+            responseText: '',
+            rawCitations: [],
+            latencyMs: 0,
+            errorMessage: err?.message || String(err)
+          };
+        }
 
-  const chatgptScore = Math.round((chatgptSuccesses / totalPrompts) * 100);
-  const claudeScore = Math.round((claudeSuccesses / totalPrompts) * 100);
-  const geminiScore = Math.round((geminiSuccesses / totalPrompts) * 100);
+        const responseText = queryResult.responseText || '';
+        const status = queryResult.status;
 
-  const dateStr = new Date().toISOString().split('T')[0];
+        if (status === 'api_error' || status === 'timeout') {
+          const errAlert = `${engine.name} (${queryResult.model}): ${queryResult.errorMessage || status}`;
+          if (!criticalErrors.includes(errAlert)) criticalErrors.push(errAlert);
+        }
 
-  // Detect critical issues across all responses
-  const criticalErrors: string[] = [];
-  for (const r of runLog) {
-    [
-      { name: 'ChatGPT', resp: r.chatgptResponse },
-      { name: 'Claude', resp: r.claudeResponse },
-      { name: 'Gemini', resp: r.geminiResponse }
-    ].forEach(({ name, resp }) => {
-      if (typeof resp === 'string' && resp.startsWith('[')) {
-        const lower = resp.toLowerCase();
-        if (
-          lower.includes('quota') ||
-          lower.includes('credit') ||
-          lower.includes('balance') ||
-          lower.includes('billing') ||
-          lower.includes('not found') ||
-          lower.includes('no longer available') ||
-          lower.includes('deprecated') ||
-          lower.includes('unauthorized') ||
-          lower.includes('authentication') ||
-          lower.includes('permission') ||
-          lower.includes('missing')
-        ) {
-          let cleanMsg = resp.replace(/^\[(API|FETCH|ERROR)[^:]*:\s*/i, '').replace(/\]$/, '');
-          // Strip out dynamic timestamps and verbose URLs so all 5 prompts collapse into a single clean message
-          if (cleanMsg.includes('For more information')) {
-            cleanMsg = cleanMsg.split('. For more information')[0];
-          }
-          if (cleanMsg.toLowerCase().includes('quota exceeded')) {
-            cleanMsg = 'Daily rate limit / quota exceeded on current plan.';
-          }
-          const clean = `${name}: ${cleanMsg.trim()}`;
-          if (!criticalErrors.includes(clean)) {
-            criticalErrors.push(clean);
-          }
+        // Deterministic detection
+        const detection = detectBrandMention(responseText);
+        const citationData = analyzeCitations(responseText, queryResult.rawCitations);
+
+        if (detection.isMentioned) {
+          engineSuccesses[engine.name] = (engineSuccesses[engine.name] || 0) + 1;
+        }
+
+        const row: HarnessRow = {
+          run_date: dateStr,
+          engine: engine.name,
+          model: queryResult.model,
+          prompt_id: task.topicId,
+          topic: task.topicName,
+          location: task.location,
+          language: "en",
+          phrasing: "explicit",
+          run_idx: 1,
+          status,
+          mention_class: detection.mentionClass,
+          list_position: detection.listPosition === null ? '' : detection.listPosition,
+          kidsdds_cited: citationData.kidsddsCited,
+          cited_domains: citationData.citedDomains.join('; '),
+          competitors: citationData.competitors.join('; '),
+          response_text: responseText,
+          response_hash: computeHash(responseText)
+        };
+        runRows.push(row);
+
+        taskLog.engines[engine.name] = {
+          response: responseText,
+          status,
+          mentioned: detection.isMentioned,
+          mentionClass: detection.mentionClass,
+          listPosition: detection.listPosition,
+          kidsddsCited: citationData.kidsddsCited
+        };
+
+        // Populate legacy fields for dashboard compatibility
+        if (engine.name === 'OpenAI') {
+          taskLog.chatgptResponse = responseText;
+          taskLog.chatgptMentioned = detection.isMentioned;
+        } else if (engine.name === 'Claude') {
+          taskLog.claudeResponse = responseText;
+          taskLog.claudeMentioned = detection.isMentioned;
+        } else if (engine.name === 'Gemini') {
+          taskLog.geminiResponse = responseText;
+          taskLog.geminiMentioned = detection.isMentioned;
+        } else if (engine.name === 'Perplexity') {
+          taskLog.perplexityResponse = responseText;
+          taskLog.perplexityMentioned = detection.isMentioned;
         }
       }
-    });
-  }
 
-  // Save to Firebase
-  if (adminDb && adminDb.collection) {
-    try {
-      // 1. Save detailed log of exactly what was asked and answered
-      await adminDb.collection('cron_logs').add({
-        date: dateStr,
-        startTime: startTime,
-        endTime: endTime,
-        durationMs,
-        communities_tested: selectedCommunities,
-        chatgpt_score: chatgptScore,
-        claude_score: claudeScore,
-        gemini_score: geminiScore,
-        criticalErrors,
-        logs: runLog
-      });
+      dashboardLogs.push(taskLog);
+    }
 
-      // 2. Save high-level daily score snapshot for the charts
-      await adminDb.collection('llm_visibility').doc(dateStr).set({
-        date: dateStr,
-        chatgpt_score: chatgptScore,
-        claude_score: claudeScore,
-        gemini_score: geminiScore,
-        communities_tested: selectedCommunities,
-        timestamp: new Date()
-      });
+    const endTime = new Date();
+    const durationMs = endTime.getTime() - startTime.getTime();
 
-      // 3. Update system_alerts document for prominent UI warning banner
-      if (criticalErrors.length > 0) {
+    // Calculate visibility percentages
+    const chatgptScore = engineTotals['OpenAI'] ? Math.round(((engineSuccesses['OpenAI'] || 0) / engineTotals['OpenAI']) * 100) : 0;
+    const claudeScore = engineTotals['Claude'] ? Math.round(((engineSuccesses['Claude'] || 0) / engineTotals['Claude']) * 100) : 0;
+    const geminiScore = engineTotals['Gemini'] ? Math.round(((engineSuccesses['Gemini'] || 0) / engineTotals['Gemini']) * 100) : 0;
+    const perplexityScore = engineTotals['Perplexity'] ? Math.round(((engineSuccesses['Perplexity'] || 0) / engineTotals['Perplexity']) * 100) : 0;
+
+    // Save run outputs locally/to disk if possible
+    saveRunOutputs(dateStr, runRows);
+
+    // Save to Firebase Firestore
+    if (adminDb && adminDb.collection) {
+      try {
+        await adminDb.collection('cron_logs').add({
+          date: dateStr,
+          startTime,
+          endTime,
+          durationMs,
+          communities_tested: selectedCommunities,
+          chatgpt_score: chatgptScore,
+          claude_score: claudeScore,
+          gemini_score: geminiScore,
+          perplexity_score: perplexityScore,
+          engineTotals,
+          engineSuccesses,
+          criticalErrors,
+          logs: dashboardLogs
+        });
+
+        await adminDb.collection('llm_visibility').doc(dateStr).set({
+          date: dateStr,
+          chatgpt_score: chatgptScore,
+          claude_score: claudeScore,
+          gemini_score: geminiScore,
+          perplexity_score: perplexityScore,
+          communities_tested: selectedCommunities,
+          timestamp: new Date()
+        });
+
         await adminDb.collection('system_alerts').doc('latest_cron_alert').set({
           date: dateStr,
           timestamp: new Date(),
-          resolved: false,
+          resolved: criticalErrors.length === 0,
           issues: criticalErrors
         });
-      } else {
-        await adminDb.collection('system_alerts').doc('latest_cron_alert').set({
-          date: dateStr,
-          timestamp: new Date(),
-          resolved: true,
-          issues: []
-        });
+      } catch (fbErr) {
+        console.error("Firestore persistence error:", fbErr);
       }
-    } catch (e) {
-      console.error("Firebase write error:", e);
     }
-  }
 
-  // If there are critical provider issues, return 502 Bad Gateway so GitHub Actions triggers an email notification!
-  if (criticalErrors.length > 0) {
-    return NextResponse.json({ 
-      success: false, 
+    const hasCriticalIssues = criticalErrors.length > 0;
+    return NextResponse.json({
+      success: !hasCriticalIssues,
       date: dateStr,
+      durationMs,
+      scores: {
+        chatgpt: chatgptScore,
+        claude: claudeScore,
+        gemini: geminiScore,
+        perplexity: perplexityScore
+      },
       criticalErrors,
-      chatgptScore, 
-      claudeScore,
-      geminiScore,
       tested: selectedCommunities
-    }, { status: 502 });
-  }
+    }, { status: hasCriticalIssues ? 502 : 200 });
 
-  return NextResponse.json({ 
-    success: true, 
-    date: dateStr,
-    chatgptScore, 
-    claudeScore,
-    geminiScore,
-    tested: selectedCommunities
-  });
+  } finally {
+    await releaseRunLock();
+  }
 }
