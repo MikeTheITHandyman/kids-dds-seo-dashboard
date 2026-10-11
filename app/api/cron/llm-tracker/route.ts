@@ -185,36 +185,50 @@ export async function GET(request: Request) {
   let geminiSuccesses = 0;
   const totalPrompts = selectedCommunities.length * TOPICS.length;
 
+  // Create tasks for all community + topic combinations
+  const tasks: { location: string; topic: string; prompt: string }[] = [];
   for (const location of selectedCommunities) {
     for (const topic of TOPICS) {
-      const prompt = topic.prompt.replace("{location}", location);
-      
+      tasks.push({
+        location,
+        topic: topic.type,
+        prompt: topic.prompt.replace("{location}", location)
+      });
+    }
+  }
+
+  // Execute all prompts in parallel for lightning-fast execution well under Netlify's timeout
+  const results = await Promise.all(
+    tasks.map(async task => {
       const [gptResponse, claudeResponse, geminiResponse] = await Promise.all([
-        queryOpenAI(prompt),
-        queryClaude(prompt),
-        queryGemini(prompt)
+        queryOpenAI(task.prompt),
+        queryClaude(task.prompt),
+        queryGemini(task.prompt)
       ]);
 
       const gptMention = checkBrandMention(gptResponse);
       const claudeMention = checkBrandMention(claudeResponse);
       const geminiMention = checkBrandMention(geminiResponse);
 
-      if (gptMention) chatgptSuccesses++;
-      if (claudeMention) claudeSuccesses++;
-      if (geminiMention) geminiSuccesses++;
-
-      runLog.push({
-        location,
-        topic: topic.type,
-        prompt,
+      return {
+        location: task.location,
+        topic: task.topic,
+        prompt: task.prompt,
         chatgptResponse: gptResponse,
         chatgptMentioned: gptMention,
         claudeResponse: claudeResponse,
         claudeMentioned: claudeMention,
         geminiResponse: geminiResponse,
         geminiMentioned: geminiMention
-      });
-    }
+      };
+    })
+  );
+
+  for (const r of results) {
+    if (r.chatgptMentioned) chatgptSuccesses++;
+    if (r.claudeMentioned) claudeSuccesses++;
+    if (r.geminiMentioned) geminiSuccesses++;
+    runLog.push(r);
   }
 
   const endTime = new Date();
