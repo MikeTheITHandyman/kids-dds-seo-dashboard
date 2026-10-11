@@ -6,10 +6,12 @@ import {
   formatLocationString 
 } from '@/lib/ai-harness/config';
 import { detectBrandMention } from '@/lib/ai-harness/detector';
-import { analyzeCitations, classifyRefusal } from '@/lib/ai-harness/citations';
+import { analyzeCitations } from '@/lib/ai-harness/citations';
 import { runPreflightChecks } from '@/lib/ai-harness/preflight';
 import { acquireRunLock, releaseRunLock } from '@/lib/ai-harness/lock';
 import { HarnessRow, computeHash, saveRunOutputs } from '@/lib/ai-harness/export';
+
+export const maxDuration = 60; // 60 seconds serverless maximum
 
 // Core communities always tested on every run
 const CORE_COMMUNITIES = [
@@ -73,7 +75,7 @@ export async function GET(request: Request) {
       ? ["Grayslake"] 
       : [...CORE_COMMUNITIES, shuffledRotating[0]];
 
-    // 3. Select topic templates (use first 5 for standard cron to stay within serverless execution bounds)
+    // 3. Select topic templates
     const templatesToTest = isDryRun 
       ? TOPIC_TEMPLATES.slice(0, 2) 
       : TOPIC_TEMPLATES.slice(0, 5);
@@ -81,7 +83,6 @@ export async function GET(request: Request) {
     const tasks: { location: string; topicId: string; topicName: string; prompt: string }[] = [];
     for (const locName of selectedCommunities) {
       for (const t of templatesToTest) {
-        // Find matching LocationConfig or format cleanly
         const locConfig = LOCATIONS.find(l => l.name.toLowerCase() === locName.toLowerCase()) || {
           name: locName,
           state: locName.includes("WI") ? "WI" : "IL",
@@ -106,7 +107,7 @@ export async function GET(request: Request) {
       criticalErrors.push(preflight.alertMessage);
     }
 
-    // Engine metrics
+    // Track metrics
     const engineSuccesses: Record<string, number> = {};
     const engineTotals: Record<string, number> = {};
     activeEngines.forEach(e => {
@@ -114,96 +115,111 @@ export async function GET(request: Request) {
       engineTotals[e.name] = 0;
     });
 
-    // Execute queries
-    for (const task of tasks) {
-      const taskLog: any = {
-        location: task.location,
-        topic: task.topicName,
-        prompt: task.prompt,
-        engines: {}
-      };
-
-      for (const engine of activeEngines) {
-        engineTotals[engine.name] = (engineTotals[engine.name] || 0) + 1;
-
-        let queryResult;
-        try {
-          queryResult = await engine.query(task.prompt);
-        } catch (err: any) {
-          queryResult = {
-            engine: engine.name,
-            model: 'unknown',
-            status: 'api_error' as const,
-            responseText: '',
-            rawCitations: [],
-            latencyMs: 0,
-            errorMessage: err?.message || String(err)
-          };
-        }
-
-        const responseText = queryResult.responseText || '';
-        const status = queryResult.status;
-
-        if (status === 'api_error' || status === 'timeout') {
-          const errAlert = `${engine.name} (${queryResult.model}): ${queryResult.errorMessage || status}`;
-          if (!criticalErrors.includes(errAlert)) criticalErrors.push(errAlert);
-        }
-
-        // Deterministic detection
-        const detection = detectBrandMention(responseText);
-        const citationData = analyzeCitations(responseText, queryResult.rawCitations);
-
-        if (detection.isMentioned) {
-          engineSuccesses[engine.name] = (engineSuccesses[engine.name] || 0) + 1;
-        }
-
-        const row: HarnessRow = {
-          run_date: dateStr,
-          engine: engine.name,
-          model: queryResult.model,
-          prompt_id: task.topicId,
-          topic: task.topicName,
+    // Execute tasks CONCURRENTLY across all engines to finish within serverless timeouts (typically < 10s)
+    const taskResults = await Promise.all(
+      tasks.map(async (task, taskIdx) => {
+        const taskLog: any = {
           location: task.location,
-          language: "en",
-          phrasing: "explicit",
-          run_idx: 1,
-          status,
-          mention_class: detection.mentionClass,
-          list_position: detection.listPosition === null ? '' : detection.listPosition,
-          kidsdds_cited: citationData.kidsddsCited,
-          cited_domains: citationData.citedDomains.join('; '),
-          competitors: citationData.competitors.join('; '),
-          response_text: responseText,
-          response_hash: computeHash(responseText)
+          topic: task.topicName,
+          prompt: task.prompt,
+          engines: {}
         };
-        runRows.push(row);
+        const rowsForTask: HarnessRow[] = [];
 
-        taskLog.engines[engine.name] = {
-          response: responseText,
-          status,
-          mentioned: detection.isMentioned,
-          mentionClass: detection.mentionClass,
-          listPosition: detection.listPosition,
-          kidsddsCited: citationData.kidsddsCited
-        };
+        // Run all active engines concurrently for this prompt
+        await Promise.all(
+          activeEngines.map(async (engine) => {
+            // Slight stagger for Gemini rate-limits
+            if (engine.name === 'Gemini' && taskIdx > 0) {
+              await new Promise(r => setTimeout(r, (taskIdx % 4) * 250));
+            }
 
-        // Populate legacy fields for dashboard compatibility
-        if (engine.name === 'OpenAI') {
-          taskLog.chatgptResponse = responseText;
-          taskLog.chatgptMentioned = detection.isMentioned;
-        } else if (engine.name === 'Claude') {
-          taskLog.claudeResponse = responseText;
-          taskLog.claudeMentioned = detection.isMentioned;
-        } else if (engine.name === 'Gemini') {
-          taskLog.geminiResponse = responseText;
-          taskLog.geminiMentioned = detection.isMentioned;
-        } else if (engine.name === 'Perplexity') {
-          taskLog.perplexityResponse = responseText;
-          taskLog.perplexityMentioned = detection.isMentioned;
-        }
-      }
+            let queryResult;
+            try {
+              // 12s per-call timeout
+              queryResult = await engine.query(task.prompt, 12000);
+            } catch (err: any) {
+              queryResult = {
+                engine: engine.name,
+                model: 'unknown',
+                status: 'api_error' as const,
+                responseText: '',
+                rawCitations: [],
+                latencyMs: 0,
+                errorMessage: err?.message || String(err)
+              };
+            }
 
-      dashboardLogs.push(taskLog);
+            const responseText = queryResult.responseText || '';
+            const status = queryResult.status;
+
+            if (status === 'api_error' || status === 'timeout') {
+              const errAlert = `${engine.name} (${queryResult.model}): ${queryResult.errorMessage || status}`;
+              if (!criticalErrors.includes(errAlert)) criticalErrors.push(errAlert);
+            }
+
+            const detection = detectBrandMention(responseText);
+            const citationData = analyzeCitations(responseText, queryResult.rawCitations);
+
+            if (detection.isMentioned) {
+              engineSuccesses[engine.name] = (engineSuccesses[engine.name] || 0) + 1;
+            }
+            engineTotals[engine.name] = (engineTotals[engine.name] || 0) + 1;
+
+            const row: HarnessRow = {
+              run_date: dateStr,
+              engine: engine.name,
+              model: queryResult.model,
+              prompt_id: task.topicId,
+              topic: task.topicName,
+              location: task.location,
+              language: "en",
+              phrasing: "explicit",
+              run_idx: 1,
+              status,
+              mention_class: detection.mentionClass,
+              list_position: detection.listPosition === null ? '' : detection.listPosition,
+              kidsdds_cited: citationData.kidsddsCited,
+              cited_domains: citationData.citedDomains.join('; '),
+              competitors: citationData.competitors.join('; '),
+              response_text: responseText,
+              response_hash: computeHash(responseText)
+            };
+            rowsForTask.push(row);
+
+            taskLog.engines[engine.name] = {
+              response: responseText,
+              status,
+              mentioned: detection.isMentioned,
+              mentionClass: detection.mentionClass,
+              listPosition: detection.listPosition,
+              kidsddsCited: citationData.kidsddsCited
+            };
+
+            if (engine.name === 'OpenAI') {
+              taskLog.chatgptResponse = responseText;
+              taskLog.chatgptMentioned = detection.isMentioned;
+            } else if (engine.name === 'Claude') {
+              taskLog.claudeResponse = responseText;
+              taskLog.claudeMentioned = detection.isMentioned;
+            } else if (engine.name === 'Gemini') {
+              taskLog.geminiResponse = responseText;
+              taskLog.geminiMentioned = detection.isMentioned;
+            } else if (engine.name === 'Perplexity') {
+              taskLog.perplexityResponse = responseText;
+              taskLog.perplexityMentioned = detection.isMentioned;
+            }
+          })
+        );
+
+        return { taskLog, rowsForTask };
+      })
+    );
+
+    // Aggregate results
+    for (const res of taskResults) {
+      dashboardLogs.push(res.taskLog);
+      runRows.push(...res.rowsForTask);
     }
 
     const endTime = new Date();
@@ -215,7 +231,6 @@ export async function GET(request: Request) {
     const geminiScore = engineTotals['Gemini'] ? Math.round(((engineSuccesses['Gemini'] || 0) / engineTotals['Gemini']) * 100) : 0;
     const perplexityScore = engineTotals['Perplexity'] ? Math.round(((engineSuccesses['Perplexity'] || 0) / engineTotals['Perplexity']) * 100) : 0;
 
-    // Save run outputs locally/to disk if possible
     saveRunOutputs(dateStr, runRows);
 
     // Save to Firebase Firestore
