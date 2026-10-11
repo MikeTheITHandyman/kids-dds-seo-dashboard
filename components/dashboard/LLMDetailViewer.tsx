@@ -1,6 +1,6 @@
 'use client';
 import { useState, useMemo } from 'react';
-import { Bot, Sparkles, CheckCircle2, XCircle, Calendar, Copy, Check, Filter } from 'lucide-react';
+import { Bot, Sparkles, CheckCircle2, XCircle, Calendar, Copy, Check, Filter, FileSpreadsheet, Download } from 'lucide-react';
 
 interface LogItem {
   prompt: string;
@@ -25,6 +25,12 @@ export interface CronRunLog {
   logs?: LogItem[];
 }
 
+function escapeCSV(val: any): string {
+  if (val === null || val === undefined) return '""';
+  const str = String(val).replace(/"/g, '""');
+  return `"${str}"`;
+}
+
 export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
   const [selectedRunId, setSelectedRunId] = useState<string>(runs[0]?.id || '');
   const [selectedLlm, setSelectedLlm] = useState<'all' | 'chatgpt' | 'claude' | 'gemini'>('all');
@@ -40,6 +46,93 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleExportCurrent = () => {
+    if (!currentRun) return;
+    const itemsToExport = filteredLogs.length > 0 ? filteredLogs : (currentRun.logs || []);
+    const headers = [
+      'Date',
+      'Location',
+      'Topic',
+      'Question / Prompt',
+      'ChatGPT Mentioned',
+      'ChatGPT Response',
+      'Claude Mentioned',
+      'Claude Response',
+      'Gemini Mentioned',
+      'Gemini Response'
+    ];
+
+    const rows = itemsToExport.map(log => [
+      escapeCSV(currentRun.date),
+      escapeCSV(log.location || ''),
+      escapeCSV(log.topic || ''),
+      escapeCSV(log.prompt),
+      escapeCSV(log.chatgptMentioned ? 'Yes' : 'No'),
+      escapeCSV(log.chatgptResponse || ''),
+      escapeCSV(log.claudeMentioned ? 'Yes' : 'No'),
+      escapeCSV(log.claudeResponse || ''),
+      escapeCSV(log.geminiMentioned ? 'Yes' : 'No'),
+      escapeCSV(log.geminiResponse || '')
+    ].join(','));
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCSV).join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const cleanComm = currentRun.communities_tested?.join('_').replace(/[^a-zA-Z0-9_]/g, '') || 'run';
+    link.download = `LLM_Questions_Answers_${currentRun.date}_${cleanComm}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportAll = () => {
+    if (!runs || runs.length === 0) return;
+    const headers = [
+      'Date',
+      'Location',
+      'Topic',
+      'Question / Prompt',
+      'ChatGPT Mentioned',
+      'ChatGPT Response',
+      'Claude Mentioned',
+      'Claude Response',
+      'Gemini Mentioned',
+      'Gemini Response'
+    ];
+
+    const rows: string[] = [];
+    runs.forEach(run => {
+      (run.logs || []).forEach(log => {
+        rows.push([
+          escapeCSV(run.date),
+          escapeCSV(log.location || ''),
+          escapeCSV(log.topic || ''),
+          escapeCSV(log.prompt),
+          escapeCSV(log.chatgptMentioned ? 'Yes' : 'No'),
+          escapeCSV(log.chatgptResponse || ''),
+          escapeCSV(log.claudeMentioned ? 'Yes' : 'No'),
+          escapeCSV(log.claudeResponse || ''),
+          escapeCSV(log.geminiMentioned ? 'Yes' : 'No'),
+          escapeCSV(log.geminiResponse || '')
+        ].join(','));
+      });
+    });
+
+    const csvContent = '\uFEFF' + [headers.map(escapeCSV).join(','), ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `LLM_Questions_Answers_All_Runs_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   if (!runs || runs.length === 0) {
@@ -98,20 +191,44 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
             </p>
           </div>
 
-          {/* Date Selector */}
-          <div className="flex items-center gap-2">
-            <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
-            <select
-              value={selectedRunId}
-              onChange={(e) => setSelectedRunId(e.target.value)}
-              className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8] cursor-pointer"
-            >
-              {runs.map(run => (
-                <option key={run.id} value={run.id}>
-                  {run.date} ({run.communities_tested?.join(', ') || 'Lake County'})
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Date Selector */}
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
+              <select
+                value={selectedRunId}
+                onChange={(e) => setSelectedRunId(e.target.value)}
+                className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8] cursor-pointer"
+              >
+                {runs.map(run => (
+                  <option key={run.id} value={run.id}>
+                    {run.date} ({run.communities_tested?.join(', ') || 'Lake County'})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Export Actions */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExportCurrent}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm"
+                title="Download CSV spreadsheet for currently selected day (Excel / Google Sheets compatible)"
+              >
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                Export to Spreadsheet ({filteredLogs.length})
+              </button>
+              {runs.length > 1 && (
+                <button
+                  onClick={handleExportAll}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors"
+                  title="Export all historical audit logs across all dates to CSV"
+                >
+                  <Download className="h-3.5 w-3.5 text-slate-500" />
+                  All Dates
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
