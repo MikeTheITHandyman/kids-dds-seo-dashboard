@@ -5,6 +5,7 @@ import DateFilter from '@/components/dashboard/DateFilter';
 import { aggregateData, Granularity } from '@/lib/data-aggregation';
 import { adminDb } from '@/lib/firebase-admin';
 import { getPreviousPeriod, mergeComparisonData } from '@/lib/date-utils';
+import LLMDetailViewer from '@/components/dashboard/LLMDetailViewer';
 import { Suspense } from 'react';
 
 export default async function LLMVisibility({
@@ -182,6 +183,32 @@ export default async function LLMVisibility({
   const avgClaude = count > 0 ? (totalClaude / count).toFixed(1) + '%' : '0%';
   const avgGemini = count > 0 ? (totalGemini / count).toFixed(1) + '%' : '0%';
 
+  // Fetch detailed cron run logs from Firestore
+  let cronRunLogs: any[] = [];
+  if (adminDb && adminDb.collection) {
+    try {
+      const logsSnap = await adminDb.collection('cron_logs')
+        .orderBy('startTime', 'desc')
+        .limit(20)
+        .get();
+      
+      cronRunLogs = logsSnap.docs.map(doc => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          date: d.date || 'Recent',
+          communities_tested: d.communities_tested || [],
+          chatgpt_score: d.chatgpt_score || 0,
+          claude_score: d.claude_score || 0,
+          gemini_score: d.gemini_score || 0,
+          logs: d.logs || []
+        };
+      });
+    } catch (e) {
+      console.error("Error fetching cron_logs:", e);
+    }
+  }
+
   return (
     <div id="dashboard-content" className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -224,6 +251,9 @@ export default async function LLMVisibility({
           ]} 
         />
       </div>
+
+      {/* Interactive LLM Questions & Answers Audit Trail */}
+      <LLMDetailViewer runs={cronRunLogs} />
     </div>
   );
 }
