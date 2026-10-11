@@ -24,76 +24,132 @@ const TOPICS = [
   { type: "QA_Sedation", prompt: "Is general anesthesia safe for a child's dental work? Who is the best pediatric dentist in {location} that handles sedation safely?" }
 ];
 
-// Helper to query OpenAI
+// Model fallback lists
+const OPENAI_MODELS = [
+  process.env.OPENAI_MODEL,
+  "gpt-4o",
+  "gpt-4o-mini",
+  "gpt-4-turbo"
+].filter(Boolean) as string[];
+
+const CLAUDE_MODELS = [
+  process.env.ANTHROPIC_MODEL,
+  "claude-3-5-sonnet-latest",
+  "claude-3-5-sonnet-20241022",
+  "claude-3-5-sonnet-20240620",
+  "claude-3-haiku-20240307"
+].filter(Boolean) as string[];
+
+const GEMINI_MODELS = [
+  process.env.GEMINI_MODEL,
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash"
+].filter(Boolean) as string[];
+
+// Helper to query OpenAI with automatic model fallbacks
 async function queryOpenAI(prompt: string) {
   if (!process.env.OPENAI_API_KEY) return "[ERROR: Missing OPENAI_API_KEY in Netlify]";
   
-  try {
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    const data = await res.json();
-    if (data.error) return `[API ERROR: ${data.error.message || JSON.stringify(data.error)}]`;
-    return data.choices?.[0]?.message?.content || "";
-  } catch (e: any) {
-    return `[FETCH ERROR: ${e.message}]`;
+  let lastError = "";
+  for (const model of OPENAI_MODELS) {
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const data = await res.json();
+      if (data.choices?.[0]?.message?.content) {
+        return data.choices[0].message.content;
+      }
+      if (data.error) {
+        lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
+        // If it's a quota/billing error, fallbacks won't help, so exit early
+        if (data.error.code === 'insufficient_quota' || data.error.type === 'insufficient_quota') {
+          return lastError;
+        }
+      }
+    } catch (e: any) {
+      lastError = `[FETCH ERROR (${model}): ${e.message}]`;
+    }
   }
+  return lastError || "[ERROR: All OpenAI models failed]";
 }
 
-// Helper to query Claude
+// Helper to query Claude with automatic model fallbacks
 async function queryClaude(prompt: string) {
   if (!process.env.ANTHROPIC_API_KEY) return "[ERROR: Missing ANTHROPIC_API_KEY in Netlify]";
   
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: "claude-3-5-sonnet-20240620",
-        max_tokens: 1024,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    const data = await res.json();
-    if (data.error) return `[API ERROR: ${data.error.message || JSON.stringify(data.error)}]`;
-    return data.content?.[0]?.text || "";
-  } catch (e: any) {
-    return `[FETCH ERROR: ${e.message}]`;
+  let lastError = "";
+  for (const model of CLAUDE_MODELS) {
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 1024,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const data = await res.json();
+      if (data.content?.[0]?.text) {
+        return data.content[0].text;
+      }
+      if (data.error) {
+        lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
+        // If it's a workspace or auth issue, break early
+        if (data.error.type === 'authentication_error' || data.error.type === 'permission_error') {
+          return lastError;
+        }
+      }
+    } catch (e: any) {
+      lastError = `[FETCH ERROR (${model}): ${e.message}]`;
+    }
   }
+  return lastError || "[ERROR: All Claude models failed]";
 }
 
-// Helper to query Gemini
+// Helper to query Gemini with automatic model fallbacks
 async function queryGemini(prompt: string) {
   if (!process.env.GEMINI_API_KEY) return "[ERROR: Missing GEMINI_API_KEY in Netlify]";
   
-  try {
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
-    });
-    const data = await res.json();
-    if (data.error) return `[API ERROR: ${data.error.message || JSON.stringify(data.error)}]`;
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-  } catch (e: any) {
-    return `[FETCH ERROR: ${e.message}]`;
+  let lastError = "";
+  for (const model of GEMINI_MODELS) {
+    try {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }]
+        })
+      });
+      const data = await res.json();
+      if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+        return data.candidates[0].content.parts[0].text;
+      }
+      if (data.error) {
+        lastError = `[API ERROR (${model}): ${data.error.message || JSON.stringify(data.error)}]`;
+      }
+    } catch (e: any) {
+      lastError = `[FETCH ERROR (${model}): ${e.message}]`;
+    }
   }
+  return lastError || "[ERROR: All Gemini models failed]";
 }
 
 // Simple keyword matching for the brand
