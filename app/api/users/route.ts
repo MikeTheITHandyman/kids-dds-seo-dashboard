@@ -1,10 +1,37 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/auth';
 
 export const dynamic = 'force-dynamic';
 
-// GET all users
+async function checkAdminAuth() {
+  const session = await auth();
+  if (!session?.user?.email) {
+    return { 
+      authorized: false, 
+      response: NextResponse.json({ error: "Unauthorized: Please log in" }, { status: 401 }) 
+    };
+  }
+  const email = session.user.email.toLowerCase().trim();
+  const role = (session.user as any).role;
+  const isAdmin = role === 'ADMIN' || email === 'mike@kidsdds.com' || email === 'mike@miketheithandyman.com';
+  
+  if (!isAdmin) {
+    return { 
+      authorized: false, 
+      response: NextResponse.json({ error: "Forbidden: Administrator role required to manage users" }, { status: 403 }) 
+    };
+  }
+  return { authorized: true, session };
+}
+
+// GET all users (requires logged in user)
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized: Please log in" }, { status: 401 });
+  }
+
   if (!adminDb || !adminDb.collection) {
     return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
   }
@@ -30,8 +57,11 @@ export async function GET() {
   }
 }
 
-// POST create or invite new user
+// POST create or invite new user (requires ADMIN role)
 export async function POST(request: Request) {
+  const authCheck = await checkAdminAuth();
+  if (!authCheck.authorized) return authCheck.response;
+
   if (!adminDb || !adminDb.collection) {
     return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
   }
@@ -80,7 +110,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "User added successfully",
+      message: "User authorized successfully",
       user: {
         id: newUserRef.id,
         email: cleanEmail,
@@ -95,8 +125,11 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH update user role or status
+// PATCH update user role or status (requires ADMIN role)
 export async function PATCH(request: Request) {
+  const authCheck = await checkAdminAuth();
+  if (!authCheck.authorized) return authCheck.response;
+
   if (!adminDb || !adminDb.collection) {
     return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
   }
@@ -127,8 +160,11 @@ export async function PATCH(request: Request) {
   }
 }
 
-// DELETE user
+// DELETE user (requires ADMIN role)
 export async function DELETE(request: Request) {
+  const authCheck = await checkAdminAuth();
+  if (!authCheck.authorized) return authCheck.response;
+
   if (!adminDb || !adminDb.collection) {
     return NextResponse.json({ error: "Database unavailable" }, { status: 500 });
   }

@@ -13,7 +13,15 @@ export interface DashboardUser {
   createdAt?: string | null;
 }
 
-export default function UserManager({ initialUsers }: { initialUsers: DashboardUser[] }) {
+export default function UserManager({ 
+  initialUsers,
+  isAdmin = true,
+  currentUserEmail = ''
+}: { 
+  initialUsers: DashboardUser[];
+  isAdmin?: boolean;
+  currentUserEmail?: string;
+}) {
   const [users, setUsers] = useState<DashboardUser[]>(initialUsers);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -165,15 +173,24 @@ export default function UserManager({ initialUsers }: { initialUsers: DashboardU
                 className="pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8]"
               />
             </div>
-            <button
-              onClick={() => setIsAddModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-sm font-semibold shadow-sm"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add User
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setIsAddModalOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-sm font-semibold shadow-sm"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add User
+              </button>
+            )}
           </div>
         </div>
+
+        {!isAdmin && (
+          <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 text-xs text-amber-800 font-medium flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
+            <span>Viewing in read-only mode. Administrator privileges are required to invite or modify team members.</span>
+          </div>
+        )}
 
         {/* Users Table */}
         <div className="overflow-x-auto">
@@ -220,23 +237,35 @@ export default function UserManager({ initialUsers }: { initialUsers: DashboardU
                       </div>
                     </td>
 
-                    {/* Role dropdown */}
+                    {/* Role dropdown or badge */}
                     <td className="py-4 px-6">
-                      <select
-                        value={user.role}
-                        onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
-                        className={`text-xs font-semibold px-2.5 py-1 rounded-md border cursor-pointer focus:outline-none transition-colors ${
+                      {isAdmin ? (
+                        <select
+                          value={user.role}
+                          onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
+                          className={`text-xs font-semibold px-2.5 py-1 rounded-md border cursor-pointer focus:outline-none transition-colors ${
+                            user.role === 'ADMIN'
+                              ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                              : user.role === 'ANALYST'
+                              ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                          }`}
+                        >
+                          <option value="ADMIN">ADMIN</option>
+                          <option value="ANALYST">ANALYST</option>
+                          <option value="VIEWER">VIEWER</option>
+                        </select>
+                      ) : (
+                        <span className={`inline-flex px-2.5 py-0.5 rounded text-xs font-semibold ${
                           user.role === 'ADMIN'
-                            ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
                             : user.role === 'ANALYST'
-                            ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                            : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                        }`}
-                      >
-                        <option value="ADMIN">ADMIN</option>
-                        <option value="ANALYST">ANALYST</option>
-                        <option value="VIEWER">VIEWER</option>
-                      </select>
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        }`}>
+                          {user.role}
+                        </span>
+                      )}
                     </td>
 
                     {/* Status */}
@@ -249,18 +278,24 @@ export default function UserManager({ initialUsers }: { initialUsers: DashboardU
 
                     {/* Actions */}
                     <td className="py-4 px-6 text-right">
-                      <button
-                        onClick={() => handleDeleteUser(user.id, user.email)}
-                        disabled={deletingId === user.id}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="Revoke User Access"
-                      >
-                        {deletingId === user.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </button>
+                      {isAdmin && user.email.toLowerCase() !== currentUserEmail.toLowerCase() ? (
+                        <button
+                          onClick={() => handleDeleteUser(user.id, user.email)}
+                          disabled={deletingId === user.id}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          title="Revoke User Access"
+                        >
+                          {deletingId === user.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-rose-500" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400 italic">
+                          {user.email.toLowerCase() === currentUserEmail.toLowerCase() ? 'You' : '—'}
+                        </span>
+                      )}
                     </td>
                   </tr>
                 ))

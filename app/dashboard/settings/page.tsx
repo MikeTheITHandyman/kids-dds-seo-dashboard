@@ -1,9 +1,15 @@
 import { adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/auth';
 import UserManager, { DashboardUser } from '@/components/dashboard/UserManager';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Settings() {
+  const session = await auth();
+  const currentEmail = session?.user?.email?.toLowerCase().trim() || '';
+  const currentRole = (session?.user as any)?.role || 'ANALYST';
+  const isAdmin = currentRole === 'ADMIN' || currentEmail === 'mike@kidsdds.com' || currentEmail === 'mike@miketheithandyman.com';
+
   let users: DashboardUser[] = [];
 
   if (adminDb && adminDb.collection) {
@@ -15,7 +21,7 @@ export default async function Settings() {
           id: doc.id,
           name: d.name || d.displayName || d.email?.split('@')[0] || 'Team Member',
           email: d.email || '',
-          role: (d.role || (d.email?.includes('admin') || d.email === 'mike@kidsdds.com' ? 'ADMIN' : 'ANALYST')) as 'ADMIN' | 'ANALYST' | 'VIEWER',
+          role: (d.role || (d.email?.includes('admin') || d.email === 'mike@kidsdds.com' || d.email === 'mike@miketheithandyman.com' ? 'ADMIN' : 'ANALYST')) as 'ADMIN' | 'ANALYST' | 'VIEWER',
           status: d.status || 'Active',
           image: d.image || null,
           createdAt: d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate().toISOString() : String(d.createdAt)) : null
@@ -33,7 +39,11 @@ export default async function Settings() {
         <p className="text-slate-500">Manage authorized users, assign roles, and configure dashboard access</p>
       </div>
 
-      <UserManager initialUsers={users} />
+      <UserManager 
+        initialUsers={users} 
+        isAdmin={isAdmin} 
+        currentUserEmail={currentEmail} 
+      />
     </div>
   );
 }
