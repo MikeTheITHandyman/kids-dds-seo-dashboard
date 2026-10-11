@@ -61,7 +61,7 @@ export const openaiEngine: EngineClient = {
       const responsesApiPayload = {
         model,
         input: prompt,
-        tools: [{ type: "web_search", mode: "live" }]
+        tools: [{ type: "web_search" }]
       };
 
       let text = '';
@@ -80,18 +80,25 @@ export const openaiEngine: EngineClient = {
 
       if (respRes.ok) {
         const respData = await respRes.json();
-        // Parse Responses API output
+        // Parse Responses API output structure
         if (respData.output_text) {
           text = respData.output_text;
         } else if (Array.isArray(respData.output)) {
           for (const item of respData.output) {
-            if (item.content) text += item.content + '\n';
-          }
-        }
-        // Extract citations from response metadata
-        if (Array.isArray(respData.citations)) {
-          for (const c of respData.citations) {
-            if (c.url) rawCitations.push(c.url);
+            if (item.type === 'message' && Array.isArray(item.content)) {
+              for (const c of item.content) {
+                if (c.type === 'output_text') {
+                  text += (c.text || '');
+                  if (Array.isArray(c.annotations)) {
+                    for (const ann of c.annotations) {
+                      if (ann.url) rawCitations.push(ann.url);
+                    }
+                  }
+                }
+              }
+            } else if (typeof item.content === 'string') {
+              text += item.content + '\n';
+            }
           }
         }
       } else {
