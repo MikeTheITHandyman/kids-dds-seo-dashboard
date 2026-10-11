@@ -1,52 +1,39 @@
-export default function Settings() {
+import { adminDb } from '@/lib/firebase-admin';
+import UserManager, { DashboardUser } from '@/components/dashboard/UserManager';
+
+export const dynamic = 'force-dynamic';
+
+export default async function Settings() {
+  let users: DashboardUser[] = [];
+
+  if (adminDb && adminDb.collection) {
+    try {
+      const snap = await adminDb.collection('users').get();
+      users = snap.docs.map((doc: any) => {
+        const d = doc.data();
+        return {
+          id: doc.id,
+          name: d.name || d.displayName || d.email?.split('@')[0] || 'Team Member',
+          email: d.email || '',
+          role: (d.role || (d.email?.includes('admin') || d.email === 'mike@kidsdds.com' ? 'ADMIN' : 'ANALYST')) as 'ADMIN' | 'ANALYST' | 'VIEWER',
+          status: d.status || 'Active',
+          image: d.image || null,
+          createdAt: d.createdAt ? (d.createdAt.toDate ? d.createdAt.toDate().toISOString() : String(d.createdAt)) : null
+        };
+      });
+    } catch (e) {
+      console.error("Error fetching users for settings:", e);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Settings & Users</h1>
-        <p className="text-slate-500">Manage dashboard access and roles</p>
+        <h1 className="text-2xl font-bold text-slate-800">Settings & Team Access</h1>
+        <p className="text-slate-500">Manage authorized users, assign roles, and configure dashboard access</p>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-200 flex justify-between items-center">
-          <h2 className="text-lg font-semibold text-slate-800">Authorized Users</h2>
-          <button className="px-4 py-2 bg-[#6B4BC8] text-white rounded-lg hover:bg-opacity-90 transition-colors text-sm font-medium">
-            Add User
-          </button>
-        </div>
-        
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="p-4 text-sm font-semibold text-slate-600">Email</th>
-              <th className="p-4 text-sm font-semibold text-slate-600">Role</th>
-              <th className="p-4 text-sm font-semibold text-slate-600">Status</th>
-              <th className="p-4 text-sm font-semibold text-slate-600 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="border-b border-slate-100">
-              <td className="p-4 text-sm text-slate-800">admin@kidsdds.com</td>
-              <td className="p-4 text-sm text-slate-800">
-                <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded text-xs font-medium">ADMIN</span>
-              </td>
-              <td className="p-4 text-sm text-slate-800">Active</td>
-              <td className="p-4 text-sm text-slate-800 text-right">
-                <button className="text-slate-400 hover:text-[#6B4BC8]">Edit</button>
-              </td>
-            </tr>
-            <tr className="border-b border-slate-100">
-              <td className="p-4 text-sm text-slate-800">analyst@kidsdds.com</td>
-              <td className="p-4 text-sm text-slate-800">
-                <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs font-medium">ANALYST</span>
-              </td>
-              <td className="p-4 text-sm text-slate-800">Active</td>
-              <td className="p-4 text-sm text-slate-800 text-right">
-                <button className="text-slate-400 hover:text-[#6B4BC8]">Edit</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <UserManager initialUsers={users} />
     </div>
   );
 }
