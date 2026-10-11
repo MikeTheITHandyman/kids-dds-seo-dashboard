@@ -61,6 +61,24 @@ export async function GET(request: Request) {
     }
   }
 
+  // First test GET /v1/models to see what this key is authorized for
+  let availableModels: any = null;
+  try {
+    const mRes = await fetch("https://api.anthropic.com/v1/models", {
+      method: "GET",
+      headers: {
+        "x-api-key": apiKey.trim(),
+        "anthropic-version": "2023-06-01"
+      }
+    });
+    availableModels = {
+      status: mRes.status,
+      data: await mRes.json()
+    };
+  } catch (e: any) {
+    availableModels = { error: e.message };
+  }
+
   return NextResponse.json({
     keySummary: {
       prefix: keyPrefix,
@@ -68,6 +86,7 @@ export async function GET(request: Request) {
       length: keyLength,
       workspaceId
     },
+    availableModels,
     results
   });
 }
