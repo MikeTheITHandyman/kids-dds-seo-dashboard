@@ -1,6 +1,8 @@
 import { ReactNode } from 'react';
 import Link from 'next/link';
 
+import SystemAlertBanner from '@/components/dashboard/SystemAlertBanner';
+
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -41,6 +43,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </div>
         </header>
         <div className="flex-1 p-8 overflow-auto">
+          <SystemAlertBanner />
           {children}
         </div>
       </main>

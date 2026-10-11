@@ -9,4 +9,4 @@ jobs:
     steps:
       - name: Ping LLM Tracker API
         run: |
-          curl -X GET "https://kidsddsseo.netlify.app/api/cron/llm-tracker" -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+          curl --fail-with-body -X GET "https://kidsddsseo.netlify.app/api/cron/llm-tracker" -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

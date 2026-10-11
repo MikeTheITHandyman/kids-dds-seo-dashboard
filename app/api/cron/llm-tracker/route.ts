@@ -42,6 +42,7 @@ const CLAUDE_MODELS = [
 
 const GEMINI_MODELS = [
   process.env.GEMINI_MODEL,
+  "gemini-3.8-flash",
   "gemini-flash-latest",
   "gemini-2.5-flash",
   "gemini-2.0-flash",
@@ -123,10 +124,11 @@ async function queryClaude(prompt: string) {
   return lastError || "[ERROR: All Claude models failed]";
 }
 
-// Helper to query Gemini with automatic model fallbacks
-async function queryGemini(prompt: string) {
+// Helper to query Gemini with automatic model fallbacks and optional rate-limit delay
+async function queryGemini(prompt: string, delayMs: number = 0) {
   if (!process.env.GEMINI_API_KEY) return "[ERROR: Missing GEMINI_API_KEY in Netlify]";
-  
+  if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+
   let lastError = "";
   for (const model of GEMINI_MODELS) {
     try {
@@ -162,7 +164,6 @@ function checkBrandMention(response: string) {
     "kidsdds", 
     "kids dentist", 
     "kidsdentist.com",
-    // Add specific doctor names here if desired (e.g. "dr. mike", "dr. smith")
   ];
   
   const lowerResp = response.toLowerCase();
@@ -200,13 +201,13 @@ export async function GET(request: Request) {
     }
   }
 
-  // Execute all prompts in parallel for lightning-fast execution well under Netlify's timeout
+  // Execute all prompts concurrently (Gemini calls are staggered by 1s to prevent free-tier 429 limits)
   const results = await Promise.all(
-    tasks.map(async task => {
+    tasks.map(async (task, idx) => {
       const [gptResponse, claudeResponse, geminiResponse] = await Promise.all([
         queryOpenAI(task.prompt),
         queryClaude(task.prompt),
-        queryGemini(task.prompt)
+        queryGemini(task.prompt, idx * 1000)
       ]);
 
       const gptMention = checkBrandMention(gptResponse);
@@ -243,6 +244,38 @@ export async function GET(request: Request) {
 
   const dateStr = new Date().toISOString().split('T')[0];
 
+  // Detect critical issues across all responses
+  const criticalErrors: string[] = [];
+  for (const r of runLog) {
+    [
+      { name: 'ChatGPT', resp: r.chatgptResponse },
+      { name: 'Claude', resp: r.claudeResponse },
+      { name: 'Gemini', resp: r.geminiResponse }
+    ].forEach(({ name, resp }) => {
+      if (typeof resp === 'string' && resp.startsWith('[')) {
+        const lower = resp.toLowerCase();
+        if (
+          lower.includes('quota') ||
+          lower.includes('credit') ||
+          lower.includes('balance') ||
+          lower.includes('billing') ||
+          lower.includes('not found') ||
+          lower.includes('no longer available') ||
+          lower.includes('deprecated') ||
+          lower.includes('unauthorized') ||
+          lower.includes('authentication') ||
+          lower.includes('permission') ||
+          lower.includes('missing')
+        ) {
+          const clean = `${name}: ${resp.replace(/^\[(API|FETCH|ERROR)[^:]*:\s*/i, '').replace(/\]$/, '')}`;
+          if (!criticalErrors.includes(clean)) {
+            criticalErrors.push(clean);
+          }
+        }
+      }
+    });
+  }
+
   // Save to Firebase
   if (adminDb && adminDb.collection) {
     try {
@@ -256,6 +289,7 @@ export async function GET(request: Request) {
         chatgpt_score: chatgptScore,
         claude_score: claudeScore,
         gemini_score: geminiScore,
+        criticalErrors,
         logs: runLog
       });
 
@@ -268,9 +302,39 @@ export async function GET(request: Request) {
         communities_tested: selectedCommunities,
         timestamp: new Date()
       });
+
+      // 3. Update system_alerts document for prominent UI warning banner
+      if (criticalErrors.length > 0) {
+        await adminDb.collection('system_alerts').doc('latest_cron_alert').set({
+          date: dateStr,
+          timestamp: new Date(),
+          resolved: false,
+          issues: criticalErrors
+        });
+      } else {
+        await adminDb.collection('system_alerts').doc('latest_cron_alert').set({
+          date: dateStr,
+          timestamp: new Date(),
+          resolved: true,
+          issues: []
+        });
+      }
     } catch (e) {
       console.error("Firebase write error:", e);
     }
+  }
+
+  // If there are critical provider issues, return 502 Bad Gateway so GitHub Actions triggers an email notification!
+  if (criticalErrors.length > 0) {
+    return NextResponse.json({ 
+      success: false, 
+      date: dateStr,
+      criticalErrors,
+      chatgptScore, 
+      claudeScore,
+      geminiScore,
+      tested: selectedCommunities
+    }, { status: 502 });
   }
 
   return NextResponse.json({ 
