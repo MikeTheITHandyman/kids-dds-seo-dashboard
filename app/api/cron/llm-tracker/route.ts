@@ -15,13 +15,28 @@ const COMMUNITIES = [
   "Mundelein"
 ];
 
-// The core topics from the "Questions Every Parent Is Afraid to Ask" framework
+// The core topics engineered to bypass AI refusal guardrails and elicit specific local practice names
 const TOPICS = [
-  { type: "Local", prompt: "Who is the best pediatric dentist in {location}?" },
-  { type: "Emergency", prompt: "My 5-year-old just knocked out a tooth, where should I take them in {location}?" },
-  { type: "QA_Guilt", prompt: "My toddler won't let me brush their teeth and I feel guilty. What should I do? Can you recommend a non-judgmental pediatric dentist near {location}?" },
-  { type: "QA_Treatment", prompt: "Why treat cavities in baby teeth if they just fall out anyway? Are there any dentists in {location} who specialize in explaining this to parents?" },
-  { type: "QA_Sedation", prompt: "Is general anesthesia safe for a child's dental work? Who is the best pediatric dentist in {location} that handles sedation safely?" }
+  { 
+    type: "Local", 
+    prompt: "What are some reputable, highly recommended pediatric dental practices serving families in or near {location}, IL? Please list specific clinics and pediatric dentists in Lake County." 
+  },
+  { 
+    type: "Emergency", 
+    prompt: "If a child in or near {location}, IL has a dental emergency (like a knocked out tooth), what pediatric dental offices in the area should parents contact? Please name specific clinics." 
+  },
+  { 
+    type: "QA_Guilt", 
+    prompt: "Which pediatric dental offices near {location}, IL are known for gentle, non-judgmental, and compassionate care for toddlers? Please provide specific practice names." 
+  },
+  { 
+    type: "QA_Treatment", 
+    prompt: "Can you recommend pediatric dentists near {location}, IL that specialize in children's preventative care and cavity treatments? Please name specific practices." 
+  },
+  { 
+    type: "QA_Sedation", 
+    prompt: "What pediatric dental practices in or near {location}, IL offer safe sedation or gentle dental care for anxious kids? Please list specific clinics." 
+  }
 ];
 
 // Model fallback lists
@@ -177,13 +192,24 @@ async function queryGemini(prompt: string, delayMs: number = 0) {
   return primaryError || "[ERROR: All Gemini models failed]";
 }
 
-// Simple keyword matching for the brand
+// Simple keyword matching for the brand, practice, and doctors
 function checkBrandMention(response: string) {
   const brandKeywords = [
     "kids dds", 
     "kidsdds", 
     "kids dentist", 
     "kidsdentist.com",
+    "kidsdds.com",
+    "dr. sonia",
+    "dr. gutierrez",
+    "dr. dave",
+    "dr. rutcosky",
+    "dr. sahar",
+    "dr. alrayyes",
+    "dr. compton",
+    "dr. kim",
+    "160 commerce",
+    "commerce dr"
   ];
   
   const lowerResp = response.toLowerCase();
