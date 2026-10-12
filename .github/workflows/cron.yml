@@ -1,8 +1,8 @@
-name: Weekly AI Visibility Harness
+name: Nightly AI Visibility Harness
 on:
   schedule:
-    # Runs every Monday at 08:00 UTC (03:00 AM CDT / 02:00 AM CST)
-    - cron: "0 8 * * 1"
+    # Runs nightly at 08:15 UTC (03:15 AM CDT / 02:15 AM CST)
+    - cron: "15 8 * * *"
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI
 
 jobs:
@@ -11,5 +11,5 @@ jobs:
     steps:
       - name: Trigger AI Visibility Tracker
         run: |
-          curl --fail-with-body -X GET "https://kidsddsseo.netlify.app/api/cron/llm-tracker" \
+          curl --fail-with-body --retry 3 --retry-delay 10 -X GET "https://kidsddsseo.netlify.app/api/cron/llm-tracker" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
