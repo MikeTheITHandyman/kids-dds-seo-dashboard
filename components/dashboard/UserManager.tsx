@@ -149,34 +149,34 @@ export default function UserManager({
       )}
 
       {/* Main Card */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         {/* Header toolbar */}
-        <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="p-4 sm:p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <Shield className="h-5 w-5 text-[#6B4BC8]" />
+            <h2 className="text-base sm:text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Shield className="h-5 w-5 text-[#6B4BC8] shrink-0" />
               Authorized Team Members
             </h2>
-            <p className="text-sm text-slate-500">
+            <p className="text-xs sm:text-sm text-slate-500">
               Users authorized to log into the Kids Dental Specialists SEO & LLM Dashboard.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="relative">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <div className="relative flex-1 sm:flex-initial">
               <Search className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 placeholder="Search users..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8]"
+                className="w-full sm:w-auto pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8]"
               />
             </div>
             {isAdmin && (
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-sm font-semibold shadow-sm"
+                className="inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-xs sm:text-sm font-semibold shadow-xs shrink-0"
               >
                 <UserPlus className="h-4 w-4" />
                 Add User
@@ -186,7 +186,7 @@ export default function UserManager({
         </div>
 
         {!isAdmin && (
-          <div className="bg-amber-50 border-b border-amber-200 px-6 py-2.5 text-xs text-amber-800 font-medium flex items-center gap-2">
+          <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2.5 text-xs text-amber-800 font-medium flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
             <span>Viewing in read-only mode. Administrator privileges are required to invite or modify team members.</span>
           </div>
@@ -197,10 +197,10 @@ export default function UserManager({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-semibold">
-                <th className="py-3 px-6">User</th>
-                <th className="py-3 px-6">Role / Permissions</th>
-                <th className="py-3 px-6">Status</th>
-                <th className="py-3 px-6 text-right">Actions</th>
+                <th className="py-3 px-4 sm:px-6">User</th>
+                <th className="py-3 px-4 sm:px-6">Role / Permissions</th>
+                <th className="py-3 px-4 sm:px-6 hidden sm:table-cell">Status</th>
+                <th className="py-3 px-4 sm:px-6 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
@@ -214,36 +214,36 @@ export default function UserManager({
                 filteredUsers.map((user) => (
                   <tr key={user.id} className="hover:bg-slate-50/60 transition-colors">
                     {/* User info */}
-                    <td className="py-4 px-6">
-                      <div className="flex items-center gap-3">
+                    <td className="py-3.5 px-4 sm:py-4 sm:px-6">
+                      <div className="flex items-center gap-2.5 sm:gap-3">
                         {user.image ? (
                           <img
                             src={user.image}
                             alt={user.name}
-                            className="w-9 h-9 rounded-full object-cover border border-slate-200"
+                            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full object-cover border border-slate-200 shrink-0"
                           />
                         ) : (
-                          <div className="w-9 h-9 rounded-full bg-purple-100 text-[#6B4BC8] font-bold flex items-center justify-center text-sm border border-purple-200">
+                          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-purple-100 text-[#6B4BC8] font-bold flex items-center justify-center text-xs sm:text-sm border border-purple-200 shrink-0">
                             {user.name ? user.name[0].toUpperCase() : user.email[0].toUpperCase()}
                           </div>
                         )}
-                        <div>
-                          <div className="font-semibold text-slate-800">{user.name}</div>
-                          <div className="text-xs text-slate-500 flex items-center gap-1">
-                            <Mail className="h-3 w-3 text-slate-400" />
-                            {user.email}
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800 truncate">{user.name}</div>
+                          <div className="text-xs text-slate-500 flex items-center gap-1 truncate">
+                            <Mail className="h-3 w-3 text-slate-400 shrink-0" />
+                            <span className="truncate">{user.email}</span>
                           </div>
                         </div>
                       </div>
                     </td>
 
                     {/* Role dropdown or badge */}
-                    <td className="py-4 px-6">
+                    <td className="py-3.5 px-4 sm:py-4 sm:px-6">
                       {isAdmin ? (
                         <select
                           value={user.role}
                           onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
-                          className={`text-xs font-semibold px-2.5 py-1 rounded-md border cursor-pointer focus:outline-none transition-colors ${
+                          className={`text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-md border cursor-pointer focus:outline-none transition-colors ${
                             user.role === 'ADMIN'
                               ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
                               : user.role === 'ANALYST'
@@ -269,7 +269,7 @@ export default function UserManager({
                     </td>
 
                     {/* Status */}
-                    <td className="py-4 px-6">
+                    <td className="py-3.5 px-4 sm:py-4 sm:px-6 hidden sm:table-cell">
                       <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                         {user.status || 'Active'}
@@ -277,7 +277,7 @@ export default function UserManager({
                     </td>
 
                     {/* Actions */}
-                    <td className="py-4 px-6 text-right">
+                    <td className="py-3.5 px-4 sm:py-4 sm:px-6 text-right">
                       {isAdmin && user.email.toLowerCase() !== currentUserEmail.toLowerCase() ? (
                         <button
                           onClick={() => handleDeleteUser(user.id, user.email)}

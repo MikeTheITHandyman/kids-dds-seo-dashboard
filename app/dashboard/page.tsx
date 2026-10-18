@@ -190,13 +190,13 @@ export default async function DashboardOverview({
   const avgClaude = count > 0 ? Math.round(totalClaude / count) : 0;
 
   return (
-    <div id="dashboard-content" className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div id="dashboard-content" className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Overview</h1>
-          <p className="text-slate-500">Combined SEO and LLM Visibility Metrics</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Overview</h1>
+          <p className="text-xs sm:text-sm text-slate-500">Combined SEO and LLM Visibility Metrics</p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
@@ -204,17 +204,17 @@ export default async function DashboardOverview({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
         <StatCard title="Google Search Avg Position" value={avgGoogleRank} change={0} />
         <StatCard title="ChatGPT Visibility" value={avgChatGPT.toString()} change={0} />
         <StatCard title="Claude Visibility" value={avgClaude.toString()} change={0} />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
+        <div className="mb-3 sm:mb-4 flex items-center justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">Visibility Trend</h3>
-            <p className="text-sm text-slate-500">Note: Google rankings are LIVE. LLM visibility updates nightly via the background cron job.</p>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800">Visibility Trend</h3>
+            <p className="text-xs sm:text-sm text-slate-500">Google rankings are LIVE. LLM visibility updates nightly via cron.</p>
           </div>
         </div>
         <VisibilityChart 

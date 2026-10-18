@@ -37,6 +37,11 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
   const [mentionFilter, setMentionFilter] = useState<'all' | 'mentioned' | 'not_mentioned'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [expandedCards, setExpandedCards] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (id: string) => {
+    setExpandedCards(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   const currentRun = useMemo(() => {
     return runs.find(r => r.id === selectedRunId) || runs[0];
@@ -177,28 +182,28 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
   });
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
       {/* Header & Controls */}
-      <div className="p-6 border-b border-slate-200 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="p-4 sm:p-6 border-b border-slate-200 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-[#6B4BC8]" />
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800 flex items-center gap-2">
+              <Sparkles className="h-5 w-5 text-[#6B4BC8] shrink-0" />
               LLM Question & Answer Audit Trail
             </h3>
-            <p className="text-sm text-slate-500">
+            <p className="text-xs sm:text-sm text-slate-500">
               Inspect the exact prompts asked to each AI and read their raw, verbatim responses.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             {/* Date Selector */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
               <select
                 value={selectedRunId}
                 onChange={(e) => setSelectedRunId(e.target.value)}
-                className="text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8] cursor-pointer"
+                className="text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8] cursor-pointer flex-1 sm:flex-initial max-w-full truncate"
               >
                 {runs.map(run => (
                   <option key={run.id} value={run.id}>
@@ -209,23 +214,23 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
             </div>
 
             {/* Export Actions */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={handleExportCurrent}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-sm"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-xs flex-1 sm:flex-initial"
                 title="Download CSV spreadsheet for currently selected day (Excel / Google Sheets compatible)"
               >
-                <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
-                Export to Spreadsheet ({filteredLogs.length})
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Export CSV ({filteredLogs.length})</span>
               </button>
               {runs.length > 1 && (
                 <button
                   onClick={handleExportAll}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors"
+                  className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-slate-200 transition-colors shrink-0"
                   title="Export all historical audit logs across all dates to CSV"
                 >
                   <Download className="h-3.5 w-3.5 text-slate-500" />
-                  All Dates
+                  <span>All Dates</span>
                 </button>
               )}
             </div>
@@ -233,14 +238,14 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
         </div>
 
         {/* Filter Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
           {/* LLM Selector Tabs */}
-          <div className="flex items-center bg-slate-100 p-1 rounded-lg">
+          <div className="flex items-center bg-slate-100 p-1 rounded-lg overflow-x-auto max-w-full">
             <button
               onClick={() => setSelectedLlm('all')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all whitespace-nowrap ${
                 selectedLlm === 'all' 
-                  ? 'bg-white text-slate-800 shadow-sm' 
+                  ? 'bg-white text-slate-800 shadow-xs' 
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -248,67 +253,67 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
             </button>
             <button
               onClick={() => setSelectedLlm('chatgpt')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap ${
                 selectedLlm === 'chatgpt' 
-                  ? 'bg-emerald-600 text-white shadow-sm' 
+                  ? 'bg-emerald-600 text-white shadow-xs' 
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span className="w-2 h-2 rounded-full bg-emerald-300"></span>
+              <span className="w-2 h-2 rounded-full bg-emerald-300 shrink-0"></span>
               ChatGPT
             </button>
             <button
               onClick={() => setSelectedLlm('claude')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap ${
                 selectedLlm === 'claude' 
-                  ? 'bg-amber-600 text-white shadow-sm' 
+                  ? 'bg-amber-600 text-white shadow-xs' 
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span className="w-2 h-2 rounded-full bg-amber-300"></span>
+              <span className="w-2 h-2 rounded-full bg-amber-300 shrink-0"></span>
               Claude
             </button>
             <button
               onClick={() => setSelectedLlm('gemini')}
-              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 ${
+              className={`px-2.5 sm:px-3 py-1 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap ${
                 selectedLlm === 'gemini' 
-                  ? 'bg-blue-600 text-white shadow-sm' 
+                  ? 'bg-blue-600 text-white shadow-xs' 
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <span className="w-2 h-2 rounded-full bg-blue-300"></span>
+              <span className="w-2 h-2 rounded-full bg-blue-300 shrink-0"></span>
               Gemini
             </button>
           </div>
 
           {/* Outcome Filter & Search */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <Filter className="h-3.5 w-3.5 text-slate-400" />
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-1.5 flex-1 sm:flex-initial">
+              <Filter className="h-3.5 w-3.5 text-slate-400 shrink-0" />
               <select
                 value={mentionFilter}
                 onChange={(e) => setMentionFilter(e.target.value as any)}
-                className="text-xs bg-white border border-slate-200 rounded-md px-2 py-1 text-slate-700 cursor-pointer"
+                className="text-xs bg-white border border-slate-200 rounded-md px-2 py-1.5 text-slate-700 cursor-pointer w-full sm:w-auto"
               >
                 <option value="all">All Outcomes</option>
-                <option value="mentioned">✅ Mentioned Practice</option>
+                <option value="mentioned">✅ Mentioned</option>
                 <option value="not_mentioned">⚪ Not Mentioned</option>
               </select>
             </div>
 
             <input
               type="text"
-              placeholder="Search in answers..."
+              placeholder="Search answers..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="text-xs bg-slate-50 border border-slate-200 rounded-md px-3 py-1 text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white w-40"
+              className="text-xs bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white flex-1 sm:w-40"
             />
           </div>
         </div>
       </div>
 
       {/* Questions & Responses List */}
-      <div className="p-6 divide-y divide-slate-100 space-y-6">
+      <div className="p-4 sm:p-6 divide-y divide-slate-100 space-y-6">
         {filteredLogs.length === 0 ? (
           <div className="text-center py-8 text-slate-500 text-sm">
             No questions matched your filter criteria.
@@ -317,8 +322,8 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
           filteredLogs.map((item, idx) => (
             <div key={idx} className={idx > 0 ? 'pt-6' : ''}>
               {/* Question Banner */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3.5 mb-4">
-                <div className="flex items-center gap-2 mb-1">
+              <div className="bg-slate-50 border border-slate-200/80 rounded-lg p-3 sm:p-3.5 mb-4">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 mb-1.5">
                   <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
                     Question #{idx + 1}
                   </span>
@@ -333,13 +338,13 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
                     </span>
                   )}
                 </div>
-                <p className="text-sm font-semibold text-slate-900 leading-snug">
+                <p className="text-xs sm:text-sm font-semibold text-slate-900 leading-snug">
                   "{item.prompt}"
                 </p>
               </div>
 
               {/* Model Answers Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                 {/* ChatGPT Card */}
                 {(selectedLlm === 'all' || selectedLlm === 'chatgpt') && (
                   <div className={`rounded-lg border p-4 transition-all flex flex-col justify-between ${
@@ -363,13 +368,24 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed line-clamp-10 hover:line-clamp-none transition-all">
+                      <p
+                        onClick={() => toggleExpand(`gpt-${idx}`)}
+                        className={`text-xs text-slate-700 whitespace-pre-wrap leading-relaxed cursor-pointer transition-all ${
+                          expandedCards[`gpt-${idx}`] ? '' : 'line-clamp-8 sm:line-clamp-10 hover:line-clamp-none'
+                        }`}
+                      >
                         {item.chatgptResponse || '[No response generated]'}
                       </p>
                     </div>
 
                     {item.chatgptResponse && (
-                      <div className="mt-3 pt-2 flex justify-end border-t border-slate-100">
+                      <div className="mt-3 pt-2 flex items-center justify-between border-t border-slate-100">
+                        <button
+                          onClick={() => toggleExpand(`gpt-${idx}`)}
+                          className="text-[11px] font-medium text-emerald-700 hover:text-emerald-800 cursor-pointer"
+                        >
+                          {expandedCards[`gpt-${idx}`] ? 'Show less' : 'Show full answer'}
+                        </button>
                         <button
                           onClick={() => copyToClipboard(item.chatgptResponse!, `gpt-${idx}`)}
                           className="text-[11px] text-slate-400 hover:text-slate-600 flex items-center gap-1 cursor-pointer"
@@ -391,7 +407,7 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
 
                 {/* Claude Card */}
                 {(selectedLlm === 'all' || selectedLlm === 'claude') && (
-                  <div className={`rounded-lg border p-4 transition-all flex flex-col justify-between ${
+                  <div className={`rounded-lg border p-3.5 sm:p-4 transition-all flex flex-col justify-between ${
                     item.claudeMentioned 
                       ? 'border-amber-300 bg-amber-50/40 shadow-xs' 
                       : 'border-slate-200 bg-white'
@@ -412,13 +428,24 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed line-clamp-10 hover:line-clamp-none transition-all">
+                      <p
+                        onClick={() => toggleExpand(`claude-${idx}`)}
+                        className={`text-xs text-slate-700 whitespace-pre-wrap leading-relaxed cursor-pointer transition-all ${
+                          expandedCards[`claude-${idx}`] ? '' : 'line-clamp-8 sm:line-clamp-10 hover:line-clamp-none'
+                        }`}
+                      >
                         {item.claudeResponse || '[No response generated]'}
                       </p>
                     </div>
 
                     {item.claudeResponse && (
-                      <div className="mt-3 pt-2 flex justify-end border-t border-slate-100">
+                      <div className="mt-3 pt-2 flex items-center justify-between border-t border-slate-100">
+                        <button
+                          onClick={() => toggleExpand(`claude-${idx}`)}
+                          className="text-[11px] font-medium text-amber-700 hover:text-amber-800 cursor-pointer"
+                        >
+                          {expandedCards[`claude-${idx}`] ? 'Show less' : 'Show full answer'}
+                        </button>
                         <button
                           onClick={() => copyToClipboard(item.claudeResponse!, `claude-${idx}`)}
                           className="text-[11px] text-slate-400 hover:text-slate-600 flex items-center gap-1 cursor-pointer"
@@ -440,7 +467,7 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
 
                 {/* Gemini Card */}
                 {(selectedLlm === 'all' || selectedLlm === 'gemini') && (
-                  <div className={`rounded-lg border p-4 transition-all flex flex-col justify-between ${
+                  <div className={`rounded-lg border p-3.5 sm:p-4 transition-all flex flex-col justify-between ${
                     item.geminiMentioned 
                       ? 'border-blue-300 bg-blue-50/40 shadow-xs' 
                       : 'border-slate-200 bg-white'
@@ -461,13 +488,24 @@ export default function LLMDetailViewer({ runs }: { runs: CronRunLog[] }) {
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed line-clamp-10 hover:line-clamp-none transition-all">
+                      <p
+                        onClick={() => toggleExpand(`gemini-${idx}`)}
+                        className={`text-xs text-slate-700 whitespace-pre-wrap leading-relaxed cursor-pointer transition-all ${
+                          expandedCards[`gemini-${idx}`] ? '' : 'line-clamp-8 sm:line-clamp-10 hover:line-clamp-none'
+                        }`}
+                      >
                         {item.geminiResponse || '[No response generated]'}
                       </p>
                     </div>
 
                     {item.geminiResponse && (
-                      <div className="mt-3 pt-2 flex justify-end border-t border-slate-100">
+                      <div className="mt-3 pt-2 flex items-center justify-between border-t border-slate-100">
+                        <button
+                          onClick={() => toggleExpand(`gemini-${idx}`)}
+                          className="text-[11px] font-medium text-blue-700 hover:text-blue-800 cursor-pointer"
+                        >
+                          {expandedCards[`gemini-${idx}`] ? 'Show less' : 'Show full answer'}
+                        </button>
                         <button
                           onClick={() => copyToClipboard(item.geminiResponse!, `gemini-${idx}`)}
                           className="text-[11px] text-slate-400 hover:text-slate-600 flex items-center gap-1 cursor-pointer"

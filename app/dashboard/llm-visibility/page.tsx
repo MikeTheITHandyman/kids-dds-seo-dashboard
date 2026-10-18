@@ -210,13 +210,13 @@ export default async function LLMVisibility({
   }
 
   return (
-    <div id="dashboard-content" className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div id="dashboard-content" className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">LLM Recommendation Engine</h1>
-          <p className="text-slate-500">Live cron job tracking of ChatGPT, Claude, and Gemini</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">LLM Recommendation Engine</h1>
+          <p className="text-xs sm:text-sm text-slate-500">Live cron job tracking of ChatGPT, Claude, and Gemini</p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
@@ -224,17 +224,17 @@ export default async function LLMVisibility({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
         <StatCard title="ChatGPT Recommendation Score" value={avgGPT} change={0} />
         <StatCard title="Claude Recommendation Score" value={avgClaude} change={0} />
         <StatCard title="Gemini Recommendation Score" value={avgGemini} change={0} />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <div className="mb-4 flex flex-col justify-between">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
+        <div className="mb-3 sm:mb-4 flex flex-col justify-between">
           <div>
-            <h3 className="text-lg font-semibold text-slate-800">LLM Visibility Trend</h3>
-            <p className="text-sm text-slate-500">
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800">LLM Visibility Trend</h3>
+            <p className="text-xs sm:text-sm text-slate-500">
               Percentage of times the AI recommends Kids DDS when asked a targeted question about local pediatric dentistry.
             </p>
           </div>

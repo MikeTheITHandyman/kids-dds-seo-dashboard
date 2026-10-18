@@ -100,13 +100,13 @@ export default async function WebAnalytics({
   const totals = ga4Result.totals || { users: 0, sessions: 0, pageViews: 0, avgEngagementRate: '0%' };
 
   return (
-    <div id="dashboard-content" className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div id="dashboard-content" className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Traffic & Web Analytics</h1>
-          <p className="text-slate-500">Google Analytics 4 Metrics</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Traffic & Web Analytics</h1>
+          <p className="text-xs sm:text-sm text-slate-500">Google Analytics 4 Metrics</p>
         </div>
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
@@ -114,17 +114,17 @@ export default async function WebAnalytics({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         <StatCard title="Unique Users" value={formatNum(totals.users)} change={0} />
         <StatCard title="Total Sessions" value={formatNum(totals.sessions)} change={0} />
         <StatCard title="Pageviews" value={formatNum(totals.pageViews)} change={0} />
-        <StatCard title="Avg. Engagement Rate" value={totals.avgEngagementRate} change={0} />
+        <StatCard title="Engagement Rate" value={totals.avgEngagementRate} change={0} />
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-slate-800">Traffic Overview</h3>
-          <p className="text-sm text-slate-500">Users, Sessions, and Pageviews over time</p>
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
+        <div className="mb-3 sm:mb-4">
+          <h3 className="text-base sm:text-lg font-semibold text-slate-800">Traffic Overview</h3>
+          <p className="text-xs sm:text-sm text-slate-500">Users, Sessions, and Pageviews over time</p>
         </div>
         <VisibilityChart 
           data={timeSeriesData}
@@ -139,33 +139,33 @@ export default async function WebAnalytics({
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Top Local Cities Table */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-100">
-            <h3 className="text-lg font-semibold text-slate-800">Top Local Cities</h3>
-            <p className="text-sm text-slate-500">Where your visitors are physically located</p>
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 sm:p-6 border-b border-slate-100">
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800">Top Local Cities</h3>
+            <p className="text-xs sm:text-sm text-slate-500">Where your visitors are physically located</p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left text-slate-600">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50">
+            <table className="w-full text-xs sm:text-sm text-left text-slate-600">
+              <thead className="text-[11px] sm:text-xs text-slate-500 uppercase bg-slate-50">
                 <tr>
-                  <th className="px-6 py-3 font-medium">City</th>
-                  <th className="px-6 py-3 font-medium text-right">Sessions</th>
-                  <th className="px-6 py-3 font-medium text-right">Users</th>
+                  <th className="px-4 sm:px-6 py-3 font-medium">City</th>
+                  <th className="px-4 sm:px-6 py-3 font-medium text-right">Sessions</th>
+                  <th className="px-4 sm:px-6 py-3 font-medium text-right">Users</th>
                 </tr>
               </thead>
               <tbody>
                 {topCities.length === 0 && (
                   <tr>
-                    <td colSpan={3} className="px-6 py-8 text-center text-slate-400">No location data available yet</td>
+                    <td colSpan={3} className="px-4 sm:px-6 py-8 text-center text-slate-400">No location data available yet</td>
                   </tr>
                 )}
                 {topCities.map((row: any, i: number) => (
                   <tr key={i} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-6 py-4 font-medium text-slate-800">{row.city}</td>
-                    <td className="px-6 py-4 text-right">{row.sessions}</td>
-                    <td className="px-6 py-4 text-right">{row.users}</td>
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 font-medium text-slate-800">{row.city}</td>
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">{row.sessions}</td>
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">{row.users}</td>
                   </tr>
                 ))}
               </tbody>

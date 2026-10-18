@@ -33,10 +33,10 @@ export default async function Settings() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Settings & Team Access</h1>
-        <p className="text-slate-500">Manage authorized users, assign roles, and configure dashboard access</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Settings & Team Access</h1>
+        <p className="text-sm sm:text-base text-slate-500">Manage authorized users, assign roles, and configure dashboard access</p>
       </div>
 
       <UserManager 
