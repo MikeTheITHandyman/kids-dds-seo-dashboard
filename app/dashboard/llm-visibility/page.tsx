@@ -146,17 +146,29 @@ export default async function LLMVisibility({
     console.error("Error fetching LLM data from Firebase", e);
   }
 
+  let lastKnown = { ChatGPT: 0, Claude: 0, Gemini: 0 };
+  const sortedDatesWithData = Object.keys(llmDataMap).sort();
+  if (sortedDatesWithData.length > 0) {
+    lastKnown = { ...llmDataMap[sortedDatesWithData[0]] };
+  }
+  const earliestDataDate = sortedDatesWithData[0] || '9999-99-99';
+
   let chartData = Array.from({ length: Math.max(days, 1) }).map((_, i) => {
     const d = new Date();
     if (range === 'LM') { d.setDate(0); d.setDate(d.getDate() - (days - 1 - i)); } 
     else { d.setDate(d.getDate() - (days - 1 - i)); }
     const dateStr = d.toISOString().split('T')[0];
-    
+
+    if (llmDataMap[dateStr]) {
+      lastKnown = { ...llmDataMap[dateStr] };
+    }
+
+    const useCarry = dateStr >= earliestDataDate;
     return {
       date: dateStr,
-      ChatGPT: llmDataMap[dateStr]?.ChatGPT || 0,
-      Claude: llmDataMap[dateStr]?.Claude || 0,
-      Gemini: llmDataMap[dateStr]?.Gemini || 0,
+      ChatGPT: llmDataMap[dateStr]?.ChatGPT ?? (useCarry ? lastKnown.ChatGPT : 0),
+      Claude: llmDataMap[dateStr]?.Claude ?? (useCarry ? lastKnown.Claude : 0),
+      Gemini: llmDataMap[dateStr]?.Gemini ?? (useCarry ? lastKnown.Gemini : 0),
     };
   });
 

@@ -57,11 +57,11 @@ export const openaiEngine: EngineClient = {
     }
 
     try {
-      // 1. First attempt: OpenAI Responses API with native web_search tool
+      // 1. First attempt: OpenAI Responses API with native web_search tool (low context size to minimize credit burn)
       const responsesApiPayload = {
         model,
         input: prompt,
-        tools: [{ type: "web_search" }]
+        tools: [{ type: "web_search", search_context_size: "low" }]
       };
 
       let text = '';

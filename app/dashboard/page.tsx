@@ -147,13 +147,26 @@ export default async function DashboardOverview({
     });
   }
 
-  // Merge GSC data with Firebase LLM Data
-  let mergedData = gscData.map((row) => ({
-    ...row,
-    ChatGPT: llmDataMap[row.date]?.ChatGPT || 0,
-    Claude: llmDataMap[row.date]?.Claude || 0,
-    Gemini: llmDataMap[row.date]?.Gemini || 0,
-  }));
+  // Merge GSC data with Firebase LLM Data (carrying forward last known LLM score on off-days)
+  let lastKnown = { ChatGPT: 0, Claude: 0, Gemini: 0 };
+  const sortedDatesWithData = Object.keys(llmDataMap).sort();
+  if (sortedDatesWithData.length > 0) {
+    lastKnown = { ...llmDataMap[sortedDatesWithData[0]] };
+  }
+  const earliestDataDate = sortedDatesWithData[0] || '9999-99-99';
+
+  let mergedData = gscData.map((row) => {
+    if (llmDataMap[row.date]) {
+      lastKnown = { ...llmDataMap[row.date] };
+    }
+    const useCarry = row.date >= earliestDataDate;
+    return {
+      ...row,
+      ChatGPT: llmDataMap[row.date]?.ChatGPT ?? (useCarry ? lastKnown.ChatGPT : 0),
+      Claude: llmDataMap[row.date]?.Claude ?? (useCarry ? lastKnown.Claude : 0),
+      Gemini: llmDataMap[row.date]?.Gemini ?? (useCarry ? lastKnown.Gemini : 0),
+    };
+  });
 
   // Apply granularity grouping (average for ranking scores)
   if (mergedData.length > 0) {
