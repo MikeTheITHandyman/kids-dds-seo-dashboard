@@ -24,6 +24,7 @@ The application operates entirely server-side for data fetching to protect API k
 1. **Google Analytics 4 (GA4)**: Fetches raw traffic volume, engagement rates, and visitor location (City) using a Google Cloud Service Account.
 2. **Google Search Console (GSC)**: Fetches organic keyword rankings, impressions, clicks, and average SERP positions via the Service Account.
 3. **Firestore Database**: Stores daily snapshots of LLM visibility scores.
+4. **Sanity.io CMS**: Queries `formSubmission` records (`appointment`, `ask-doctor`, `contact`) persisted by `kidsdds.com` (fetching only `_id`, `formType`, and `submittedAt` — never PII).
 
 ## 4. Cron Job (`/api/cron/llm-tracker/route.ts`)
 A nightly automated job that tests how often AI models recommend the practice.
@@ -71,3 +72,8 @@ A nightly automated job that tests how often AI models recommend the practice.
 - **Metrics**: Unique Users, Total Sessions, Pageviews, Avg. Engagement Rate.
 - **Chart**: Plots Traffic (Users/Sessions/Pageviews) over time. If the `1D` date filter is selected, dynamically switches the GA4 dimension to `dateHour` to display a 24-hour intra-day trend.
 - **Table**: "Top Local Cities" showing visitor locations dynamically pulled from the GA4 `city` dimension.
+
+### 6.5 Form Leads (`/dashboard/leads/page.tsx`)
+- **Purpose**: Tracks live form submission conversions from `kidsdds.com` stored in Sanity.io (`formSubmission` documents).
+- **Filter**: `FormTypeFilter.tsx` allows filtering by All Forms, Appointment Request (`appointment`), Ask the Dentist (`ask-doctor`), and Contact Us (`contact`), alongside the standard `DateFilter` (`1D`, `TW`, `LW`, `30D`, `TM`, `LM`, `YTD`, `custom`), granularity (`day`, `week`, `month`), and period comparison (`compare`).
+- **Metrics & Chart**: Displays total counts and period-over-period percentage change for Total Submissions, Appointment Requests, Ask the Dentist, and Contact Us, a time-series trend chart, and a proportional breakdown by form type without exposing PII.

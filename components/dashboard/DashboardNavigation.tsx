@@ -8,6 +8,7 @@ import {
   Search,
   Sparkles,
   BarChart3,
+  ClipboardList,
   Settings,
   Menu,
   X,
@@ -39,6 +40,12 @@ const NAV_ITEMS = [
     shortName: 'Traffic',
     href: '/dashboard/analytics',
     icon: BarChart3,
+  },
+  {
+    name: 'Form Leads',
+    shortName: 'Leads',
+    href: '/dashboard/leads',
+    icon: ClipboardList,
   },
   {
     name: 'Settings & Users',
