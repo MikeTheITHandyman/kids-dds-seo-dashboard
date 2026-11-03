@@ -2,9 +2,15 @@ import StatCard from '@/components/dashboard/StatCard';
 import VisibilityChart from '@/components/dashboard/VisibilityChart';
 import ExportControls from '@/components/dashboard/ExportControls';
 import DateFilter from '@/components/dashboard/DateFilter';
-import { aggregateData, Granularity } from '@/lib/data-aggregation';
+import { aggregateData } from '@/lib/data-aggregation';
 import { fetchGSCTrend, fetchTopQueries } from '@/lib/gsc-api';
-import { getPreviousPeriod, mergeComparisonData } from '@/lib/date-utils';
+import {
+  buildDateRangeArray,
+  getDateRangeBounds,
+  getPreviousPeriod,
+  mergeComparisonData,
+} from '@/lib/date-utils';
+import { resolveFilterParams } from '@/lib/filter-prefs';
 import { Suspense } from 'react';
 
 const SITE_URL = 'sc-domain:kidsdds.com';
@@ -15,109 +21,41 @@ export default async function SearchVisibility({
   searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string; compare?: string }>;
 }) {
   const resolvedParams = await searchParams;
-  const range = resolvedParams.range || '30D';
-  const granularity = (resolvedParams.granularity || 'day') as Granularity;
-  const compare = resolvedParams.compare === 'true';
+  const { range, granularity, start, end, compare } = await resolveFilterParams(resolvedParams);
 
-  // Calculate start and end dates for the API
-  let startDate = '30daysAgo';
-  let endDate = 'today';
-  
   const today = new Date();
-  if (range === 'YTD') {
-    startDate = `${today.getFullYear()}-01-01`;
-  } else if (range === 'TW') {
-    const d = new Date(today);
-    const day = d.getDay();
-    d.setDate(d.getDate() - day);
-    startDate = d.toISOString().split('T')[0];
-    endDate = today.toISOString().split('T')[0];
-  } else if (range === 'LW') {
-    const d = new Date(today);
-    const day = d.getDay();
-    d.setDate(d.getDate() - day - 7);
-    startDate = d.toISOString().split('T')[0];
-    const end = new Date(d);
-    end.setDate(end.getDate() + 6);
-    endDate = end.toISOString().split('T')[0];
-  } else if (range === 'LW') {
-    const d = new Date(today);
-    const day = d.getDay();
-    d.setDate(d.getDate() - day - 7);
-    startDate = d.toISOString().split('T')[0];
-    const end = new Date(d);
-    end.setDate(end.getDate() + 6);
-    endDate = end.toISOString().split('T')[0];
-  } else if (range === 'TM') {
-    const month = (today.getMonth() + 1).toString().padStart(2, '0');
-    startDate = `${today.getFullYear()}-${month}-01`;
-  } else if (range === 'LM') {
-    const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-    const m = (startOfLastMonth.getMonth() + 1).toString().padStart(2, '0');
-    const y = startOfLastMonth.getFullYear();
-    startDate = `${y}-${m}-01`;
-    endDate = `${y}-${m}-${endOfLastMonth.getDate()}`;
-  } else if (range === '1D') {
-    startDate = 'today';
-    endDate = 'today';
-  } else if (range === 'custom') {
-    startDate = resolvedParams.start || '30daysAgo';
-    endDate = resolvedParams.end || 'today';
-  }
+  const { startDate: gscStart, endDate: gscEnd } = getDateRangeBounds(range, today, start, end);
+  const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
-  // Convert startDate and endDate to standard YYYY-MM-DD for GSC
-  let gscStart = startDate;
-  let gscEnd = endDate;
-  
-  if (gscStart === '30daysAgo') {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    gscStart = d.toISOString().split('T')[0];
-  } else if (gscStart === 'today') {
-    gscStart = new Date().toISOString().split('T')[0];
-  }
-
-  if (gscEnd === 'today') {
-    gscEnd = new Date().toISOString().split('T')[0];
-  }
-
-  // Handle previous period
-  const { prevStart, prevEnd } = getPreviousPeriod(range, today);
-  
   // Fetch real data from Google Search Console
   const [gscResult, queryResult, prevGscResult] = await Promise.all([
     fetchGSCTrend(SITE_URL, gscStart, gscEnd),
     fetchTopQueries(SITE_URL, gscStart, gscEnd),
-    compare ? fetchGSCTrend(SITE_URL, prevStart, prevEnd) : Promise.resolve({ timeSeriesData: [] })
+    compare && prevStart && prevEnd
+      ? fetchGSCTrend(SITE_URL, prevStart, prevEnd)
+      : Promise.resolve({ timeSeriesData: [] }),
   ]);
 
   let gscData = gscResult.timeSeriesData || [];
   let prevGscData = prevGscResult.timeSeriesData || [];
-  
+
   if (gscData.length === 0) {
-    let days = 30;
-    if (range === 'TM') days = today.getDate();
-    else if (range === 'TW') days = today.getDay() + 1;
-    else if (range === 'LW') days = 7;
-    else if (range === 'LM') days = new Date(today.getFullYear(), today.getMonth(), 0).getDate();
-    
-    gscData = Array.from({ length: Math.max(days, 1) }).map((_, i) => {
-      const d = new Date();
-      if (range === 'LM') { d.setDate(0); d.setDate(d.getDate() - (days - 1 - i)); } 
-      else { d.setDate(d.getDate() - (days - 1 - i)); }
-      return { date: d.toISOString().split('T')[0], Google: 0, Clicks: 0, Impressions: 0 };
-    });
+    gscData = buildDateRangeArray(gscStart, gscEnd).map((dateStr) => ({
+      date: dateStr,
+      Google: 0,
+      Clicks: 0,
+      Impressions: 0,
+    }));
   }
 
   // Apply granularity grouping
   let chartData = aggregateData(gscData, granularity, 'average');
-  
+
   if (compare) {
     let prevChartData = aggregateData(prevGscData, granularity, 'average');
     chartData = mergeComparisonData(chartData, prevChartData, ['Google']);
   }
-  
+
   const avgGoogleRank = gscResult.totals?.avgPosition || '0.0';
   const totalClicks = gscResult.totals?.clicks || 0;
   const totalImpressions = gscResult.totals?.impressions || 0;
@@ -147,17 +85,17 @@ export default async function SearchVisibility({
         <div className="mb-3 sm:mb-4 flex items-center justify-between">
           <div>
             <h3 className="text-base sm:text-lg font-semibold text-slate-800">Google Position Trend</h3>
-            <p className="text-xs sm:text-sm text-slate-500">Live daily average search ranking (closer to 1 is better)</p>
+            <p className="text-xs sm:text-sm text-slate-500">
+              Live daily average search ranking (closer to 1 is better)
+            </p>
           </div>
         </div>
-        <VisibilityChart 
-          data={chartData} 
+        <VisibilityChart
+          data={chartData}
           reversedY={true}
           domainY={[1, 'auto']}
           compare={compare}
-          lines={[
-            { key: 'Google', color: '#6B4BC8', name: 'Google Position' },
-          ]} 
+          lines={[{ key: 'Google', color: '#6B4BC8', name: 'Google Position' }]}
         />
       </div>
 
@@ -179,23 +117,38 @@ export default async function SearchVisibility({
             </thead>
             <tbody>
               {queryResult.queries.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 sm:px-6 py-4 text-center text-slate-500">Not enough data yet from Google Search Console. Check back in a few days.</td></tr>
+                <tr>
+                  <td colSpan={5} className="px-4 sm:px-6 py-4 text-center text-slate-500">
+                    Not enough data yet from Google Search Console. Check back in a few days.
+                  </td>
+                </tr>
               ) : (
                 queryResult.queries.map((row: any, i: number) => {
-                  const isTarget = row.query.toLowerCase().includes('pediatric dentist grayslake') || row.query.toLowerCase().includes('kids dentist grayslake');
+                  const isTarget =
+                    row.query.toLowerCase().includes('pediatric dentist grayslake') ||
+                    row.query.toLowerCase().includes('kids dentist grayslake');
                   return (
-                  <tr key={i} className={`border-b border-slate-100 hover:bg-slate-50 ${isTarget ? 'bg-indigo-50/50' : 'bg-white'}`}>
-                    <td className="px-3.5 sm:px-6 py-3 sm:py-4 font-medium text-slate-800">
-                      {row.query}
-                      {isTarget && <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] sm:text-xs font-medium bg-indigo-100 text-indigo-800">⭐ Target</span>}
-                    </td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">{row.position}</td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">{row.clicks}</td>
-                    <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">{row.impressions}</td>
-                    <td className="px-3.5 sm:px-6 py-3 sm:py-4 text-right">{row.ctr}</td>
-                  </tr>
-                )}
-                )
+                    <tr
+                      key={i}
+                      className={`border-b border-slate-100 hover:bg-slate-50 ${
+                        isTarget ? 'bg-indigo-50/50' : 'bg-white'
+                      }`}
+                    >
+                      <td className="px-3.5 sm:px-6 py-3 sm:py-4 font-medium text-slate-800">
+                        {row.query}
+                        {isTarget && (
+                          <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] sm:text-xs font-medium bg-indigo-100 text-indigo-800">
+                            ⭐ Target
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">{row.position}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">{row.clicks}</td>
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-right">{row.impressions}</td>
+                      <td className="px-3.5 sm:px-6 py-3 sm:py-4 text-right">{row.ctr}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>

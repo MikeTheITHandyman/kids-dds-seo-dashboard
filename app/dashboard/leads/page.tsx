@@ -3,22 +3,16 @@ import VisibilityChart from '@/components/dashboard/VisibilityChart';
 import ExportControls from '@/components/dashboard/ExportControls';
 import DateFilter from '@/components/dashboard/DateFilter';
 import FormTypeFilter from '@/components/dashboard/FormTypeFilter';
-import { aggregateData, Granularity } from '@/lib/data-aggregation';
+import { aggregateData } from '@/lib/data-aggregation';
 import {
   fetchSanityFormSubmissions,
   FormFilterType,
 } from '@/lib/sanity-api';
-import { getPreviousPeriod, mergeComparisonData } from '@/lib/date-utils';
+import { getDateRangeBounds, getPreviousPeriod, mergeComparisonData } from '@/lib/date-utils';
+import { resolveFilterParams } from '@/lib/filter-prefs';
 import { Suspense } from 'react';
 
 export const dynamic = 'force-dynamic';
-
-function formatLocalYMD(d: Date): string {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 function calcPercentChange(current: number, previous: number): number {
   if (previous === 0) {
@@ -40,9 +34,7 @@ export default async function FormLeadsPage({
   }>;
 }) {
   const resolvedParams = await searchParams;
-  const range = resolvedParams.range || '30D';
-  const granularity = (resolvedParams.granularity || 'day') as Granularity;
-  const compare = resolvedParams.compare === 'true';
+  const { range, granularity, start, end, compare } = await resolveFilterParams(resolvedParams);
   const rawFormType = resolvedParams.formType || 'all';
   const formType: FormFilterType =
     rawFormType === 'appointment' || rawFormType === 'ask-doctor' || rawFormType === 'contact'
@@ -50,45 +42,9 @@ export default async function FormLeadsPage({
       : 'all';
 
   const today = new Date();
-  let startDate = formatLocalYMD(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29));
-  let endDate = formatLocalYMD(today);
-
-  if (range === 'YTD') {
-    startDate = `${today.getFullYear()}-01-01`;
-  } else if (range === 'TW') {
-    const d = new Date(today);
-    const day = d.getDay(); // 0 is Sunday
-    d.setDate(d.getDate() - day);
-    startDate = formatLocalYMD(d);
-    endDate = formatLocalYMD(today);
-  } else if (range === 'LW') {
-    const d = new Date(today);
-    const day = d.getDay();
-    d.setDate(d.getDate() - day - 7);
-    startDate = formatLocalYMD(d);
-    const end = new Date(d);
-    end.setDate(end.getDate() + 6);
-    endDate = formatLocalYMD(end);
-  } else if (range === 'TM') {
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    startDate = `${today.getFullYear()}-${month}-01`;
-  } else if (range === 'LM') {
-    const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-    const m = String(startOfLastMonth.getMonth() + 1).padStart(2, '0');
-    const y = startOfLastMonth.getFullYear();
-    startDate = `${y}-${m}-01`;
-    endDate = `${y}-${m}-${String(endOfLastMonth.getDate()).padStart(2, '0')}`;
-  } else if (range === '1D') {
-    startDate = formatLocalYMD(today);
-    endDate = formatLocalYMD(today);
-  } else if (range === 'custom') {
-    if (resolvedParams.start) startDate = resolvedParams.start;
-    if (resolvedParams.end) endDate = resolvedParams.end;
-  }
-
+  const { startDate, endDate } = getDateRangeBounds(range, today, start, end);
   const isOneDay = range === '1D';
-  const { prevStart, prevEnd } = getPreviousPeriod(range, today);
+  const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
   // Fetch current and previous period data from Sanity in parallel
   const [leadsResult, prevLeadsResult] = await Promise.all([

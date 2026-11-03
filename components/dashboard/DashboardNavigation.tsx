@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -14,6 +14,9 @@ import {
   X,
   Smartphone
 } from 'lucide-react';
+import { normalizeRange } from '@/lib/date-utils';
+
+const TIMEFRAME_COOKIE_NAME = 'kdds_timeframe';
 
 const NAV_ITEMS = [
   {
@@ -22,42 +25,94 @@ const NAV_ITEMS = [
     href: '/dashboard',
     icon: LayoutDashboard,
     exact: true,
+    keepTimeframe: true,
   },
   {
     name: 'Search Engines',
     shortName: 'SEO',
     href: '/dashboard/search-visibility',
     icon: Search,
+    keepTimeframe: true,
   },
   {
     name: 'LLM Visibility',
     shortName: 'AI / LLM',
     href: '/dashboard/llm-visibility',
     icon: Sparkles,
+    keepTimeframe: true,
   },
   {
     name: 'Web Analytics',
     shortName: 'Traffic',
     href: '/dashboard/analytics',
     icon: BarChart3,
+    keepTimeframe: true,
   },
   {
     name: 'Form Leads',
     shortName: 'Leads',
     href: '/dashboard/leads',
     icon: ClipboardList,
+    keepTimeframe: true,
   },
   {
     name: 'Settings & Users',
     shortName: 'Settings',
     href: '/dashboard/settings',
     icon: Settings,
+    keepTimeframe: false,
   },
 ];
+
+function buildSavedQueryString(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const raw = window.localStorage.getItem(TIMEFRAME_COOKIE_NAME);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.range) {
+        const params = new URLSearchParams();
+        const range = normalizeRange(parsed.range);
+        params.set('range', range);
+        if (parsed.granularity) params.set('granularity', parsed.granularity);
+        if (range === 'custom' && parsed.start && parsed.end) {
+          params.set('start', parsed.start);
+          params.set('end', parsed.end);
+        }
+        if (parsed.compare === 'true' && range !== 'custom') {
+          params.set('compare', 'true');
+        }
+        return params.toString();
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return '';
+}
 
 export default function DashboardNavigation({ children, banner }: { children: React.ReactNode; banner?: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [timeframeQuery, setTimeframeQuery] = useState('');
+
+  useEffect(() => {
+    setTimeframeQuery(buildSavedQueryString());
+
+    const handleTimeframeChange = () => {
+      setTimeframeQuery(buildSavedQueryString());
+    };
+
+    window.addEventListener('kdds-timeframe-change', handleTimeframeChange);
+    return () => {
+      window.removeEventListener('kdds-timeframe-change', handleTimeframeChange);
+    };
+  }, [pathname]);
+
+  const getNavHref = (item: (typeof NAV_ITEMS)[number]) => {
+    if (!item.keepTimeframe || !timeframeQuery) return item.href;
+    return `${item.href}?${timeframeQuery}`;
+  };
 
   const isActive = (href: string, exact?: boolean) => {
     if (exact) return pathname === href;
@@ -86,7 +141,7 @@ export default function DashboardNavigation({ children, banner }: { children: Re
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={getNavHref(item)}
                 className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
                   active
                     ? 'bg-[#6B4BC8]/10 text-[#6B4BC8] font-semibold'
@@ -158,7 +213,7 @@ export default function DashboardNavigation({ children, banner }: { children: Re
                 return (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={getNavHref(item)}
                     onClick={() => setMobileMenuOpen(false)}
                     className={`flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-medium transition-colors ${
                       active
@@ -208,7 +263,7 @@ export default function DashboardNavigation({ children, banner }: { children: Re
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={getNavHref(item)}
               className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-xl min-w-[60px] transition-colors ${
                 active
                   ? 'text-[#6B4BC8] font-semibold'
