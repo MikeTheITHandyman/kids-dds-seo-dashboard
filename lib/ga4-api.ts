@@ -133,6 +133,51 @@ export async function fetchGA4CityData(propertyId: string, startDate: string, en
   }
 }
 
+export interface GA4AcquisitionChannel {
+  channel: string;
+  sessions: number;
+  users: number;
+  percentage: number;
+}
+
+export async function fetchGA4AcquisitionData(
+  propertyId: string,
+  startDate: string,
+  endDate: string
+): Promise<GA4AcquisitionChannel[]> {
+  if (!propertyId) return [];
+  const client = getClient();
+  if (!client) return [];
+
+  try {
+    const [response] = await client.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [{ startDate, endDate }],
+      dimensions: [{ name: 'sessionDefaultChannelGroup' }],
+      metrics: [{ name: 'sessions' }, { name: 'activeUsers' }],
+      orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+      limit: 10,
+    });
+
+    const rows = response.rows || [];
+    const parsed = rows.map(row => ({
+      channel: row.dimensionValues?.[0]?.value || 'Unassigned',
+      sessions: parseInt(row.metricValues?.[0]?.value || '0', 10),
+      users: parseInt(row.metricValues?.[1]?.value || '0', 10),
+    }));
+
+    const totalSessions = parsed.reduce((sum, item) => sum + item.sessions, 0);
+
+    return parsed.map(item => ({
+      ...item,
+      percentage: totalSessions > 0 ? Math.round((item.sessions / totalSessions) * 1000) / 10 : 0,
+    }));
+  } catch (error: any) {
+    console.error('Error fetching GA4 acquisition data:', error);
+    return [];
+  }
+}
+
 export interface GA4DiscoveredEvent {
   eventName: string;
   eventCount: number;

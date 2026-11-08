@@ -3,13 +3,39 @@ import VisibilityChart from '@/components/dashboard/VisibilityChart';
 import ExportControls from '@/components/dashboard/ExportControls';
 import DateFilter from '@/components/dashboard/DateFilter';
 import { aggregateData } from '@/lib/data-aggregation';
-import { fetchGA4Data, fetchGA4CityData } from '@/lib/ga4-api';
+import { fetchGA4Data, fetchGA4CityData, fetchGA4AcquisitionData } from '@/lib/ga4-api';
 import { getDateRangeBounds, getPreviousPeriod, mergeComparisonData } from '@/lib/date-utils';
 import { resolveFilterParams } from '@/lib/filter-prefs';
 import { getActiveClientConfig } from '@/lib/clients';
 import { Suspense } from 'react';
 
 export const dynamic = 'force-dynamic';
+
+const CHANNEL_COLORS = [
+  '#6B4BC8', // Purple
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#3b82f6', // Blue
+  '#ec4899', // Pink
+  '#06b6d4', // Cyan
+  '#64748b', // Slate
+];
+
+function formatChannelLabel(channel: string): string {
+  switch (channel) {
+    case 'Organic Search':
+      return 'Organic Search (Google/Bing)';
+    case 'Direct':
+      return 'Direct (Typed URL/Bookmarks)';
+    case 'Referral':
+      return 'Referral (Other websites)';
+    case 'Organic Social':
+    case 'Paid Social':
+      return `${channel} (Facebook/Instagram)`;
+    default:
+      return channel;
+  }
+}
 
 export default async function WebAnalytics({
   searchParams,
@@ -34,9 +60,10 @@ export default async function WebAnalytics({
   const { ga4StartDate, ga4EndDate } = getDateRangeBounds(range, today, start, end);
   const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
-  const [ga4Result, topCities, prevGa4Result] = await Promise.all([
+  const [ga4Result, topCities, acquisitionChannels, prevGa4Result] = await Promise.all([
     fetchGA4Data(propertyId, ga4StartDate, ga4EndDate),
     fetchGA4CityData(propertyId, ga4StartDate, ga4EndDate),
+    fetchGA4AcquisitionData(propertyId, ga4StartDate, ga4EndDate),
     compare && prevStart && prevEnd && propertyId
       ? fetchGA4Data(propertyId, prevStart, prevEnd)
       : Promise.resolve({ timeSeriesData: [] }),
@@ -159,50 +186,46 @@ export default async function WebAnalytics({
           </div>
         </div>
 
-        {/* Acquisition Breakdown */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col">
+        {/* Live GA4 Acquisition Breakdown */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs p-4 sm:p-6 flex flex-col">
           <div className="mb-4">
-            <h3 className="text-lg font-semibold text-slate-800">User Acquisition</h3>
-            <p className="text-sm text-slate-500">Where your traffic is coming from</p>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800">User Acquisition</h3>
+            <p className="text-xs sm:text-sm text-slate-500">
+              Where your traffic is coming from (GA4 Session Default Channel Group)
+            </p>
           </div>
-          <div className="flex-1 flex flex-col justify-center space-y-4">
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-slate-700">Organic Search (Google/Bing)</span>
-                <span className="text-slate-500">65%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5">
-                <div className="bg-[#6B4BC8] h-2.5 rounded-full" style={{ width: '65%' }}></div>
-              </div>
+          {acquisitionChannels.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center py-8 text-xs sm:text-sm text-slate-400">
+              No acquisition channel data available for this date range
             </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-slate-700">Direct (Typed URL/Bookmarks)</span>
-                <span className="text-slate-500">22%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5">
-                <div className="bg-[#10b981] h-2.5 rounded-full" style={{ width: '22%' }}></div>
-              </div>
+          ) : (
+            <div className="flex-1 flex flex-col justify-center space-y-4">
+              {acquisitionChannels.map((item, idx) => {
+                const color = CHANNEL_COLORS[idx % CHANNEL_COLORS.length];
+                return (
+                  <div key={item.channel}>
+                    <div className="flex items-center justify-between text-xs sm:text-sm mb-1 gap-2">
+                      <span className="font-medium text-slate-700 truncate">
+                        {formatChannelLabel(item.channel)}
+                      </span>
+                      <span className="text-slate-500 shrink-0 font-mono text-xs">
+                        {formatNum(item.sessions)} sessions ({item.percentage}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
+                      <div
+                        className="h-2.5 rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.max(item.percentage, item.sessions > 0 ? 2 : 0)}%`,
+                          backgroundColor: color,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-slate-700">Referral (Other websites)</span>
-                <span className="text-slate-500">8%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5">
-                <div className="bg-[#f59e0b] h-2.5 rounded-full" style={{ width: '8%' }}></div>
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium text-slate-700">Social (Facebook/Instagram)</span>
-                <span className="text-slate-500">5%</span>
-              </div>
-              <div className="w-full bg-slate-100 rounded-full h-2.5">
-                <div className="bg-[#3b82f6] h-2.5 rounded-full" style={{ width: '5%' }}></div>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
