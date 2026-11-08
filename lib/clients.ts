@@ -64,7 +64,7 @@ export const DEFAULT_KIDS_DENTIST_QUESTIONS: CustomQuestion[] = TOPIC_TEMPLATES.
   promptTemplate: t.explicitTemplate,
   isRegional: true,
   enabled: idx < 6, // Enable core topics by default, user can toggle any
-  language: t.language,
+  language: t.language || 'en',
 }));
 
 export const DEFAULT_KIDS_DENTIST_CLIENT: ClientConfig = {
@@ -156,9 +156,16 @@ export function isSuperAdminEmail(email?: string | null): boolean {
   return SUPER_ADMIN_EMAILS.includes(email.toLowerCase().trim());
 }
 
+/**
+ * Recursively strips any `undefined` values so Firestore never throws on document writes.
+ */
+function stripUndefined<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj));
+}
+
 export function normalizeClientConfig(raw: Partial<ClientConfig>, idFallback?: string): ClientConfig {
   const isKidsDentist = (raw.id || idFallback) === DEFAULT_CLIENT_ID;
-  const base = isKidsDentist ? DEFAULT_KIDS_DENTIST_CLIENT : {
+  const base: ClientConfig = isKidsDentist ? DEFAULT_KIDS_DENTIST_CLIENT : {
     id: raw.id || idFallback || 'client',
     name: raw.name || 'New Client',
     shortName: raw.shortName || (raw.name ? raw.name.slice(0, 2).toUpperCase() : 'CL'),
@@ -180,8 +187,10 @@ export function normalizeClientConfig(raw: Partial<ClientConfig>, idFallback?: s
     gscSiteUrl: '',
     targetKeywords: [],
     leadsConfig: {
-      source: 'ga4_events' as const,
+      source: 'ga4_events',
       selectedGa4Events: [],
+      sanityProjectId: '',
+      sanityDataset: '',
     },
     regions: [],
     regionalRotationEnabled: true,
@@ -189,7 +198,7 @@ export function normalizeClientConfig(raw: Partial<ClientConfig>, idFallback?: s
     questions: [],
   };
 
-  return {
+  const normalized: ClientConfig = {
     ...base,
     ...raw,
     id: raw.id || idFallback || base.id,
@@ -214,10 +223,10 @@ export function normalizeClientConfig(raw: Partial<ClientConfig>, idFallback?: s
       selectedGa4Events: Array.isArray(raw.leadsConfig?.selectedGa4Events)
         ? raw.leadsConfig!.selectedGa4Events
         : base.leadsConfig.selectedGa4Events,
-      sanityProjectId: raw.leadsConfig?.sanityProjectId ?? base.leadsConfig.sanityProjectId,
-      sanityDataset: raw.leadsConfig?.sanityDataset ?? base.leadsConfig.sanityDataset,
+      sanityProjectId: raw.leadsConfig?.sanityProjectId ?? base.leadsConfig.sanityProjectId ?? '',
+      sanityDataset: raw.leadsConfig?.sanityDataset ?? base.leadsConfig.sanityDataset ?? '',
     },
-    regions: Array.isArray(raw.regions) && raw.regions.length > 0 ? raw.regions : base.regions,
+    regions: Array.isArray(raw.regions) && (raw.regions.length > 0 || !isKidsDentist) ? raw.regions : base.regions,
     regionalRotationEnabled:
       typeof raw.regionalRotationEnabled === 'boolean'
         ? raw.regionalRotationEnabled
@@ -225,8 +234,12 @@ export function normalizeClientConfig(raw: Partial<ClientConfig>, idFallback?: s
     currentRegionIndex:
       typeof raw.currentRegionIndex === 'number' ? raw.currentRegionIndex : base.currentRegionIndex,
     questions:
-      Array.isArray(raw.questions) && raw.questions.length > 0 ? raw.questions : base.questions,
+      Array.isArray(raw.questions) && (raw.questions.length > 0 || !isKidsDentist)
+        ? raw.questions.map(q => ({ ...q, language: q.language || 'en' }))
+        : base.questions,
   };
+
+  return stripUndefined(normalized);
 }
 
 /**
@@ -248,12 +261,11 @@ export async function getAllClients(): Promise<ClientConfig[]> {
     });
 
     if (!clientsMap.has(DEFAULT_CLIENT_ID)) {
-      // Seed default Kids Dentist client in Firestore
-      const seeded = {
+      const seeded = stripUndefined({
         ...DEFAULT_KIDS_DENTIST_CLIENT,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-      };
+      });
       await adminDb.collection('clients').doc(DEFAULT_CLIENT_ID).set(seeded, { merge: true }).catch(() => {});
       clientsMap.set(DEFAULT_CLIENT_ID, seeded);
     }
@@ -281,17 +293,15 @@ export async function getClientConfig(clientId?: string | null): Promise<ClientC
       return normalizeClientConfig(doc.data() as Partial<ClientConfig>, doc.id);
     }
     if (targetId === DEFAULT_CLIENT_ID) {
+      const seeded = stripUndefined({
+        ...DEFAULT_KIDS_DENTIST_CLIENT,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
       await adminDb
         .collection('clients')
         .doc(DEFAULT_CLIENT_ID)
-        .set(
-          {
-            ...DEFAULT_KIDS_DENTIST_CLIENT,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          },
-          { merge: true }
-        )
+        .set(seeded, { merge: true })
         .catch(() => {});
       return DEFAULT_KIDS_DENTIST_CLIENT;
     }
@@ -306,7 +316,16 @@ export async function saveClientConfig(
   clientId: string,
   updates: Partial<ClientConfig>
 ): Promise<ClientConfig> {
-  const existing = await getClientConfig(clientId);
+  let existing: Partial<ClientConfig> = { id: clientId };
+  if (adminDb && adminDb.collection) {
+    const doc = await adminDb.collection('clients').doc(clientId).get();
+    if (doc.exists) {
+      existing = doc.data() as Partial<ClientConfig>;
+    } else if (clientId === DEFAULT_CLIENT_ID) {
+      existing = DEFAULT_KIDS_DENTIST_CLIENT;
+    }
+  }
+
   const merged = normalizeClientConfig(
     {
       ...existing,

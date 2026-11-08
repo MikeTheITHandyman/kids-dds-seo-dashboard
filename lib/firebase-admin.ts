@@ -13,6 +13,11 @@ if (!admin.apps.length) {
           privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
         }),
       });
+      try {
+        admin.firestore().settings({ ignoreUndefinedProperties: true });
+      } catch {
+        // settings already initialized
+      }
     } catch (error) {
       console.error('Firebase admin initialization error', error);
     }

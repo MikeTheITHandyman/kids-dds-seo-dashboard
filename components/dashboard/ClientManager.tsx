@@ -417,6 +417,12 @@ export default function ClientManager({
               onChange={e => setGa4PropertyId(e.target.value)}
               className="w-full text-xs sm:text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 text-slate-800 font-mono focus:outline-none focus:border-[#6B4BC8]"
             />
+            {ga4PropertyId.trim().toUpperCase().startsWith('G-') && (
+              <p className="mt-1 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 leading-snug">
+                <strong>{ga4PropertyId.trim()}</strong> is a Measurement ID. For GA4 charts, enter the 9-digit numeric{' '}
+                <strong>Property ID</strong> (found in GA4 <strong>Admin → Property details</strong>).
+              </p>
+            )}
           </div>
 
           <div>
@@ -682,6 +688,12 @@ export default function ClientManager({
                     onChange={e => setNewGa4Id(e.target.value)}
                     className="w-full text-sm px-3 py-2 border border-slate-200 rounded-lg text-slate-800 font-mono"
                   />
+                  {newGa4Id.trim().toUpperCase().startsWith('G-') && (
+                    <p className="mt-1 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 leading-snug">
+                      Tip: <strong>{newGa4Id.trim()}</strong> is a Measurement ID. Enter the numeric{' '}
+                      <strong>Property ID</strong> (GA4 Admin → Property details).
+                    </p>
+                  )}
                 </div>
 
                 <div>
