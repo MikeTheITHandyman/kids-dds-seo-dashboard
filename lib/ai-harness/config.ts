@@ -106,6 +106,22 @@ export function formatLocationString(loc: LocationConfig): string {
   return `${name}, ${loc.state}`;
 }
 
+export function formatPromptWithRegion(
+  question: { promptTemplate: string; isRegional: boolean },
+  loc?: LocationConfig
+): string {
+  const template = question.promptTemplate.trim();
+  if (!question.isRegional || !loc) {
+    return template.replace(/\{location\}/gi, '').replace(/\s+/g, ' ').trim();
+  }
+  const formattedLoc = formatLocationString(loc);
+  if (/\{location\}/i.test(template)) {
+    return template.replace(/\{location\}/gi, formattedLoc);
+  }
+  const withoutTrailingQ = template.endsWith('?') ? template.slice(0, -1).trim() : template;
+  return `${withoutTrailingQ} in or near ${formattedLoc}?`;
+}
+
 // Business Entity Ground Truth Matchers
 export const PRACTICE_INFO = {
   name: "Kids Dentist - Sonia Gutierrez & Associates",

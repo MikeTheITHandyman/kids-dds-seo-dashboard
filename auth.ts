@@ -2,6 +2,7 @@ import NextAuth from "next-auth"
 import { FirestoreAdapter } from "@auth/firebase-adapter"
 import { adminDb } from "./lib/firebase-admin"
 import { authConfig } from "./auth.config"
+import { isSuperAdminEmail } from "./lib/clients"
 import * as admin from 'firebase-admin'
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
@@ -14,10 +15,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (!user?.email) return false;
       const email = user.email.toLowerCase().trim();
 
-      // Master admin accounts & company domain automatically allowed
+      // Master super-admin accounts & company domain automatically allowed
       if (
-        email === 'mike@kidsdds.com' ||
-        email === 'mike@miketheithandyman.com' ||
+        isSuperAdminEmail(email) ||
         email.endsWith('@kidsdds.com')
       ) {
         return true;
@@ -31,7 +31,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           if (!userSnap.empty) {
             matchedDoc = userSnap.docs[0];
           } else {
-            // Fallback case-insensitive scan in case email was stored with capital letters
             const allUsersSnap = await adminDb.collection('users').get();
             matchedDoc = allUsersSnap.docs.find(
               (doc: any) => (doc.data()?.email || '').toLowerCase().trim() === email
@@ -43,7 +42,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             if (data.status && data.status.toLowerCase() === 'suspended') {
               return '/access-denied';
             }
-            // Update user's Google avatar/name if missing
             if (user.image && !data.image) {
               await matchedDoc.ref.update({
                 image: user.image,
@@ -58,7 +56,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         }
       }
 
-      // Block unauthorized accounts and direct to access-denied page
       return '/access-denied';
     },
 
@@ -68,8 +65,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const email = rawEmail.toLowerCase().trim();
         let role = (token.role as string) || 'VIEWER';
 
-        if (email === 'mike@kidsdds.com' || email === 'mike@miketheithandyman.com') {
-          role = 'ADMIN';
+        if (isSuperAdminEmail(email)) {
+          role = 'SUPER_ADMIN';
         } else if (user && adminDb && adminDb.collection) {
           try {
             const userSnap = await adminDb.collection('users').where('email', '==', email).limit(1).get();
@@ -96,7 +93,11 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async session({ session, token }) {
       if (session?.user) {
         if (token?.sub) session.user.id = token.sub;
-        (session.user as any).role = token.role || 'VIEWER';
+        const email = session.user.email?.toLowerCase().trim() || '';
+        const resolvedRole = isSuperAdminEmail(email)
+          ? 'SUPER_ADMIN'
+          : (token.role || 'VIEWER');
+        (session.user as any).role = resolvedRole;
       }
       return session;
     }

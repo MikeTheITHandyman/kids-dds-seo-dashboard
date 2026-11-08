@@ -6,8 +6,13 @@ import {
   loadQuestionStateMap,
   LLMPreset,
   LLMFrequency,
-  PRESET_CONFIGS
+  PRESET_CONFIGS,
 } from '@/lib/ai-harness/settings';
+import {
+  getActiveClientId,
+  isSuperAdminEmail,
+  saveClientConfig,
+} from '@/lib/clients';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,32 +21,41 @@ async function checkAdminAuth() {
   if (!session?.user?.email) {
     return {
       authorized: false,
-      response: NextResponse.json({ error: 'Unauthorized: Please log in' }, { status: 401 })
+      response: NextResponse.json({ error: 'Unauthorized: Please log in' }, { status: 401 }),
     };
   }
   const email = session.user.email.toLowerCase().trim();
   const role = (session.user as any).role;
-  const isAdmin = role === 'ADMIN' || email === 'mike@kidsdds.com' || email === 'mike@miketheithandyman.com';
+  const isAdmin =
+    role === 'SUPER_ADMIN' ||
+    role === 'ADMIN' ||
+    isSuperAdminEmail(email);
 
   if (!isAdmin) {
     return {
       authorized: false,
-      response: NextResponse.json({ error: 'Forbidden: Administrator role required to modify LLM settings' }, { status: 403 })
+      response: NextResponse.json(
+        { error: 'Forbidden: Administrator role required to modify LLM settings' },
+        { status: 403 }
+      ),
     };
   }
   return { authorized: true, session, email };
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const clientId = await getActiveClientId(searchParams.get('clientId'));
+
     const [config, stateMap] = await Promise.all([
-      getLLMBudgetConfig(),
-      loadQuestionStateMap()
+      getLLMBudgetConfig(clientId),
+      loadQuestionStateMap(clientId),
     ]);
 
     const entries = Object.values(stateMap);
@@ -51,16 +65,17 @@ export async function GET() {
         key: q.key,
         location: q.location,
         topicName: q.topicName,
-        lastTestedDate: q.lastTestedDate
+        lastTestedDate: q.lastTestedDate,
       }));
 
     return NextResponse.json({
+      clientId,
       config,
       stats: {
         totalTracked: entries.length,
         masteredCount: masteredList.length,
-        masteredList
-      }
+        masteredList,
+      },
     });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Failed to load settings' }, { status: 500 });
@@ -73,6 +88,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json();
+    const clientId = await getActiveClientId(body.clientId);
     const preset = body.preset as LLMPreset | undefined;
 
     let nextConfig: any = {};
@@ -88,7 +104,6 @@ export async function POST(request: Request) {
       const smartSkipMastered = Boolean(body.smartSkipMastered);
       const recheckDays = Math.max(7, Math.min(90, Number(body.recheckDays) || 30));
 
-      // Detect if custom selections match one of the 3 presets
       let matchedPreset: LLMPreset = 'custom';
       for (const [key, val] of Object.entries(PRESET_CONFIGS)) {
         if (
@@ -106,11 +121,37 @@ export async function POST(request: Request) {
         frequency,
         questionsPerRun,
         smartSkipMastered,
-        recheckDays
+        recheckDays,
       };
     }
 
-    const saved = await saveLLMBudgetConfig(nextConfig, authCheck.email);
+    if (typeof body.autoFollowUpNotMentioned === 'boolean') {
+      nextConfig.autoFollowUpNotMentioned = body.autoFollowUpNotMentioned;
+    }
+    if (typeof body.regionalRotationEnabled === 'boolean') {
+      nextConfig.regionalRotationEnabled = body.regionalRotationEnabled;
+    }
+    if (typeof body.currentRegionIndex === 'number') {
+      nextConfig.currentRegionIndex = Math.max(0, Math.floor(body.currentRegionIndex));
+    }
+
+    const saved = await saveLLMBudgetConfig(nextConfig, authCheck.email, clientId);
+
+    // Also keep regional settings synced on client config if passed
+    if (
+      typeof body.regionalRotationEnabled === 'boolean' ||
+      typeof body.currentRegionIndex === 'number'
+    ) {
+      await saveClientConfig(clientId, {
+        ...(typeof body.regionalRotationEnabled === 'boolean'
+          ? { regionalRotationEnabled: body.regionalRotationEnabled }
+          : {}),
+        ...(typeof body.currentRegionIndex === 'number'
+          ? { currentRegionIndex: nextConfig.currentRegionIndex }
+          : {}),
+      });
+    }
+
     return NextResponse.json({ success: true, config: saved });
   } catch (e: any) {
     return NextResponse.json({ error: e.message || 'Failed to save LLM settings' }, { status: 500 });

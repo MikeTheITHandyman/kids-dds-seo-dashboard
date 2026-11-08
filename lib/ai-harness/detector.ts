@@ -1,4 +1,5 @@
 // Deterministic Brand Mention Detector (No LLM Judge)
+import type { ClientConfig } from '@/lib/clients';
 
 export type MentionClass = 'STRONG' | 'WEAK' | 'COLLISION' | 'NONE';
 
@@ -9,7 +10,14 @@ export interface DetectionResult {
   listPosition: number | null; // 1-indexed rank if in a list, null otherwise
 }
 
-const STRONG_INDICATORS = [
+export interface DetectorOptions {
+  strongIndicators?: string[];
+  brandAliases?: string[];
+  homeCity?: string;
+  conflictingCities?: string[];
+}
+
+const DEFAULT_STRONG_INDICATORS = [
   "kidsdds.com",
   "160 commerce",
   "sonia gutierrez",
@@ -23,8 +31,13 @@ const STRONG_INDICATORS = [
   "8472231400"
 ];
 
+const DEFAULT_BRAND_ALIASES = [
+  "kids dentist",
+  "kids dental"
+];
+
 // Conflicting Lake County / surrounding towns that indicate another practice
-const CONFLICTING_CITIES = [
+const DEFAULT_CONFLICTING_CITIES = [
   "gurnee",
   "lake zurich",
   "libertyville",
@@ -67,7 +80,10 @@ export function extractListPosition(fullText: string, targetSnippet: string): nu
   return itemCounter > 0 ? null : null;
 }
 
-export function detectBrandMention(responseText: string): DetectionResult {
+export function detectBrandMention(
+  responseText: string,
+  client?: Partial<ClientConfig> | DetectorOptions
+): DetectionResult {
   if (!responseText || typeof responseText !== 'string') {
     return {
       mentionClass: 'NONE',
@@ -79,8 +95,33 @@ export function detectBrandMention(responseText: string): DetectionResult {
 
   const textLower = responseText.toLowerCase();
 
+  const strongIndicators = (
+    client?.strongIndicators && client.strongIndicators.length > 0
+      ? client.strongIndicators
+      : DEFAULT_STRONG_INDICATORS
+  ).map(s => s.toLowerCase().trim()).filter(Boolean);
+
+  const brandAliases = (
+    client?.brandAliases && client.brandAliases.length > 0
+      ? client.brandAliases
+      : DEFAULT_BRAND_ALIASES
+  ).map(s => s.toLowerCase().trim()).filter(Boolean);
+
+  // Also ensure "kids dental" is checked if "kids dentist" is in aliases
+  if (brandAliases.includes('kids dentist') && !brandAliases.includes('kids dental')) {
+    brandAliases.push('kids dental');
+  }
+
+  const homeCity = (client?.homeCity || 'grayslake').toLowerCase().trim();
+
+  const conflictingCities = (
+    client?.conflictingCities && client.conflictingCities.length > 0
+      ? client.conflictingCities
+      : (homeCity === 'grayslake' ? DEFAULT_CONFLICTING_CITIES : [])
+  ).map(c => c.toLowerCase().trim()).filter(Boolean);
+
   // 1. Check STRONG Indicators
-  for (const indicator of STRONG_INDICATORS) {
+  for (const indicator of strongIndicators) {
     const idx = textLower.indexOf(indicator);
     if (idx !== -1) {
       // Extract surrounding evidence snippet (~100 chars)
@@ -99,36 +140,33 @@ export function detectBrandMention(responseText: string): DetectionResult {
   }
 
   // 2. Check WEAK vs NAME_COLLISION
-  // Look for paragraphs or list items containing "Kids Dentist"
   const paragraphs = responseText.split(/(?:\r?\n\s*\r?\n)|(?:\r?\n(?=[-*\d•]))/);
 
   for (const para of paragraphs) {
     const paraLower = para.toLowerCase();
-    const hasKidsDentist = paraLower.includes("kids dentist") || paraLower.includes("kids dental");
+    const matchedAlias = brandAliases.find(alias => paraLower.includes(alias));
 
-    if (hasKidsDentist) {
-      const hasGrayslake = paraLower.includes("grayslake");
+    if (matchedAlias) {
+      const hasHomeCity = homeCity ? paraLower.includes(homeCity) : true;
 
-      // Check if another city is explicitly linked to "Kids Dentist" (e.g. "Kids Dentist in Gurnee" or "Kids Dentist, PC - Situated in Gurnee")
-      const mentionsConflictingCity = CONFLICTING_CITIES.some(city => {
+      // Check if another city is explicitly linked to the brand alias
+      const mentionsConflictingCity = conflictingCities.some(city => {
         if (!paraLower.includes(city)) return false;
-        // If it also mentions Grayslake, verify whether Grayslake is the home city of the practice
-        if (hasGrayslake) {
-          // If Grayslake is mentioned right by Kids Dentist (e.g., "Kids Dentist in Grayslake, serving Gurnee"), allow WEAK
-          const kdIdx = paraLower.indexOf("kids dentist");
-          const grayIdx = paraLower.indexOf("grayslake");
+        if (hasHomeCity && homeCity) {
+          const aliasIdx = paraLower.indexOf(matchedAlias);
+          const homeIdx = paraLower.indexOf(homeCity);
           const otherIdx = paraLower.indexOf(city);
-          return Math.abs(kdIdx - otherIdx) < Math.abs(kdIdx - grayIdx) && city !== "grayslake";
+          return Math.abs(aliasIdx - otherIdx) < Math.abs(aliasIdx - homeIdx) && city !== homeCity;
         }
         return true;
       });
 
-      if (hasGrayslake && !mentionsConflictingCity) {
-        const kdIdx = paraLower.indexOf("kids dentist") !== -1 ? paraLower.indexOf("kids dentist") : paraLower.indexOf("kids dental");
-        const start = Math.max(0, kdIdx - 30);
-        const end = Math.min(para.length, kdIdx + 70);
+      if (hasHomeCity && !mentionsConflictingCity) {
+        const aliasIdx = paraLower.indexOf(matchedAlias);
+        const start = Math.max(0, aliasIdx - 30);
+        const end = Math.min(para.length, aliasIdx + 70);
         const snippet = para.substring(start, end).replace(/\s+/g, ' ').trim();
-        const pos = extractListPosition(responseText, "kids dentist");
+        const pos = extractListPosition(responseText, matchedAlias);
 
         return {
           mentionClass: 'WEAK',
@@ -138,10 +176,10 @@ export function detectBrandMention(responseText: string): DetectionResult {
         };
       }
 
-      // If "Kids Dentist" is associated with a different city or lacks Grayslake context -> COLLISION
-      const kdIdx = paraLower.indexOf("kids dentist") !== -1 ? paraLower.indexOf("kids dentist") : paraLower.indexOf("kids dental");
-      const start = Math.max(0, kdIdx - 30);
-      const end = Math.min(para.length, kdIdx + 70);
+      // If brand alias is associated with a different city or lacks home city context -> COLLISION
+      const aliasIdx = paraLower.indexOf(matchedAlias);
+      const start = Math.max(0, aliasIdx - 30);
+      const end = Math.min(para.length, aliasIdx + 70);
       const snippet = para.substring(start, end).replace(/\s+/g, ' ').trim();
 
       return {

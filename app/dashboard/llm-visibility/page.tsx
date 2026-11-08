@@ -12,21 +12,51 @@ import {
 } from '@/lib/date-utils';
 import { resolveFilterParams } from '@/lib/filter-prefs';
 import LLMDetailViewer from '@/components/dashboard/LLMDetailViewer';
+import LLMQuestionAndRegionManager from '@/components/dashboard/LLMQuestionAndRegionManager';
+import { auth } from '@/auth';
+import {
+  DEFAULT_CLIENT_ID,
+  getActiveClientConfig,
+  isSuperAdminEmail,
+} from '@/lib/clients';
+import { getLLMBudgetConfig } from '@/lib/ai-harness/settings';
 import { Suspense } from 'react';
+
+export const dynamic = 'force-dynamic';
 
 export default async function LLMVisibility({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string; compare?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    granularity?: string;
+    start?: string;
+    end?: string;
+    compare?: string;
+  }>;
 }) {
-  const resolvedParams = await searchParams;
+  const [resolvedParams, session, activeClient] = await Promise.all([
+    searchParams,
+    auth(),
+    getActiveClientConfig(),
+  ]);
+
+  const currentEmail = session?.user?.email?.toLowerCase().trim() || '';
+  const currentRole = (session?.user as any)?.role || 'ANALYST';
+  const isAdmin =
+    currentRole === 'SUPER_ADMIN' ||
+    currentRole === 'ADMIN' ||
+    isSuperAdminEmail(currentEmail);
+
+  const llmConfig = await getLLMBudgetConfig(activeClient.id);
+
   const { range, granularity, start, end, compare } = await resolveFilterParams(resolvedParams);
 
   const today = new Date();
   const { startDate: fsStart, endDate: fsEnd } = getDateRangeBounds(range, today, start, end);
   const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
-  // Fetch real LLM Visibility scores from Firebase
+  // Fetch LLM Visibility scores from Firebase for activeClient
   let llmDataMap: Record<string, any> = {};
   let prevLlmDataMap: Record<string, any> = {};
   let totalChatGPT = 0,
@@ -44,6 +74,9 @@ export default async function LLMVisibility({
 
       llmSnapshot.forEach((doc: any) => {
         const data = doc.data();
+        const docClientId = data.clientId || DEFAULT_CLIENT_ID;
+        if (docClientId !== activeClient.id) return;
+
         llmDataMap[data.date] = {
           ChatGPT: data.chatgpt_score || 0,
           Claude: data.claude_score || 0,
@@ -64,6 +97,9 @@ export default async function LLMVisibility({
 
         prevSnapshot.forEach((doc: any) => {
           const data = doc.data();
+          const docClientId = data.clientId || DEFAULT_CLIENT_ID;
+          if (docClientId !== activeClient.id) return;
+
           prevLlmDataMap[data.date] = {
             ChatGPT: data.chatgpt_score || 0,
             Claude: data.claude_score || 0,
@@ -84,7 +120,7 @@ export default async function LLMVisibility({
   const earliestDataDate = sortedDatesWithData[0] || '9999-99-99';
 
   const currentDates = buildDateRangeArray(fsStart, fsEnd);
-  let chartData = currentDates.map((dateStr) => {
+  let chartData = currentDates.map(dateStr => {
     if (llmDataMap[dateStr]) {
       lastKnown = { ...llmDataMap[dateStr] };
     }
@@ -102,7 +138,7 @@ export default async function LLMVisibility({
 
   if (compare && prevStart && prevEnd) {
     const prevDates = buildDateRangeArray(prevStart, prevEnd);
-    let prevChartData = prevDates.map((pDateStr) => ({
+    let prevChartData = prevDates.map(pDateStr => ({
       date: pDateStr,
       ChatGPT: prevLlmDataMap[pDateStr]?.ChatGPT || 0,
       Claude: prevLlmDataMap[pDateStr]?.Claude || 0,
@@ -116,45 +152,55 @@ export default async function LLMVisibility({
   const avgClaude = count > 0 ? (totalClaude / count).toFixed(1) + '%' : '0%';
   const avgGemini = count > 0 ? (totalGemini / count).toFixed(1) + '%' : '0%';
 
-  // Fetch detailed cron run logs from Firestore
+  // Fetch detailed cron run logs from Firestore for activeClient
   let cronRunLogs: any[] = [];
   if (adminDb && adminDb.collection) {
     try {
       const logsSnap = await adminDb
         .collection('cron_logs')
         .orderBy('startTime', 'desc')
-        .limit(20)
+        .limit(40)
         .get();
 
-      cronRunLogs = logsSnap.docs.map((doc: any) => {
-        const d = doc.data();
-        return {
-          id: doc.id,
-          date: d.date || 'Recent',
-          communities_tested: d.communities_tested || [],
-          chatgpt_score: d.chatgpt_score || 0,
-          claude_score: d.claude_score || 0,
-          gemini_score: d.gemini_score || 0,
-          logs: d.logs || [],
-        };
-      });
+      cronRunLogs = logsSnap.docs
+        .map((doc: any) => {
+          const d = doc.data();
+          return {
+            id: doc.id,
+            clientId: d.clientId || DEFAULT_CLIENT_ID,
+            date: d.date || 'Recent',
+            communities_tested: d.communities_tested || [],
+            chatgpt_score: d.chatgpt_score || 0,
+            claude_score: d.claude_score || 0,
+            gemini_score: d.gemini_score || 0,
+            logs: d.logs || [],
+          };
+        })
+        .filter((r: any) => r.clientId === activeClient.id)
+        .slice(0, 20);
     } catch (e) {
       console.error('Error fetching cron_logs:', e);
     }
   }
 
+  const exportPrefix = activeClient.name.replace(/[^a-zA-Z0-9]+/g, '_');
+
   return (
     <div id="dashboard-content" className="space-y-4 sm:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">LLM Recommendation Engine</h1>
-          <p className="text-xs sm:text-sm text-slate-500">Live cron job tracking of ChatGPT, Claude, and Gemini</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
+            LLM Recommendation Engine — {activeClient.name}
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Live tracking, regional rotation, custom questions, and AI follow-ups across ChatGPT, Claude, and Gemini
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
-          <ExportControls data={chartData} filename="Kids_DDS_LLM_Visibility" />
+          <ExportControls data={chartData} filename={`${exportPrefix}_LLM_Visibility`} />
         </div>
       </div>
 
@@ -167,10 +213,11 @@ export default async function LLMVisibility({
       <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
         <div className="mb-3 sm:mb-4 flex flex-col justify-between">
           <div>
-            <h3 className="text-base sm:text-lg font-semibold text-slate-800">LLM Visibility Trend</h3>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800">
+              LLM Visibility Trend
+            </h3>
             <p className="text-xs sm:text-sm text-slate-500">
-              Percentage of times the AI recommends Kids DDS when asked a targeted question about local pediatric
-              dentistry.
+              Percentage of times the AI recommends {activeClient.name} when asked targeted regional or general questions.
             </p>
           </div>
         </div>
@@ -187,8 +234,22 @@ export default async function LLMVisibility({
         />
       </div>
 
-      {/* Interactive LLM Questions & Answers Audit Trail */}
-      <LLMDetailViewer runs={cronRunLogs} />
+      {/* Interactive LLM Questions & Answers Audit Trail (with "Ask Why Not Included" follow-ups) */}
+      <LLMDetailViewer
+        runs={cronRunLogs}
+        clientId={activeClient.id}
+        clientName={activeClient.name}
+      />
+
+      {/* Questions Manager, Regional Rotation Queue & AI Question Recommender */}
+      <LLMQuestionAndRegionManager
+        client={activeClient}
+        currentRegionIndex={llmConfig.currentRegionIndex ?? activeClient.currentRegionIndex ?? 0}
+        regionalRotationEnabled={
+          llmConfig.regionalRotationEnabled ?? activeClient.regionalRotationEnabled ?? true
+        }
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }

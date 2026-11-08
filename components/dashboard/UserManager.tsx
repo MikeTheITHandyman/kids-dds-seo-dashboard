@@ -1,35 +1,57 @@
 'use client';
 
 import { useState } from 'react';
-import { UserPlus, Shield, User, Trash2, Mail, X, Check, AlertCircle, Loader2, Search } from 'lucide-react';
+import {
+  UserPlus,
+  Shield,
+  Trash2,
+  Mail,
+  X,
+  Check,
+  AlertCircle,
+  Loader2,
+  Search,
+  Building2,
+} from 'lucide-react';
+import type { ClientConfig } from '@/lib/clients';
 
 export interface DashboardUser {
   id: string;
   name: string;
   email: string;
-  role: 'ADMIN' | 'ANALYST' | 'VIEWER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'ANALYST' | 'VIEWER';
+  clientIds?: string[];
   status: string;
   image?: string | null;
   createdAt?: string | null;
 }
 
-export default function UserManager({ 
+export default function UserManager({
   initialUsers,
   isAdmin = true,
-  currentUserEmail = ''
-}: { 
+  isSuperAdmin = false,
+  currentUserEmail = '',
+  activeClientId = 'kids-dentist',
+  activeClientName = 'Kids Dentist',
+  allClients = [],
+}: {
   initialUsers: DashboardUser[];
   isAdmin?: boolean;
+  isSuperAdmin?: boolean;
   currentUserEmail?: string;
+  activeClientId?: string;
+  activeClientName?: string;
+  allClients?: ClientConfig[];
 }) {
   const [users, setUsers] = useState<DashboardUser[]>(initialUsers);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  
+
   // Form State
   const [formName, setFormName] = useState('');
   const [formEmail, setFormEmail] = useState('');
-  const [formRole, setFormRole] = useState<'ADMIN' | 'ANALYST' | 'VIEWER'>('ANALYST');
+  const [formRole, setFormRole] = useState<'SUPER_ADMIN' | 'ADMIN' | 'ANALYST' | 'VIEWER'>('ANALYST');
+  const [formClientIds, setFormClientIds] = useState<string[]>([activeClientId]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
@@ -41,8 +63,18 @@ export default function UserManager({
     setFormName('');
     setFormEmail('');
     setFormRole('ANALYST');
+    setFormClientIds([activeClientId]);
     setErrorMessage('');
     setIsAddModalOpen(false);
+  };
+
+  const toggleFormClient = (cid: string) => {
+    setFormClientIds(prev => {
+      if (prev.includes(cid)) {
+        return prev.length > 1 ? prev.filter(id => id !== cid) : prev;
+      }
+      return [...prev, cid];
+    });
   };
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -62,8 +94,10 @@ export default function UserManager({
         body: JSON.stringify({
           email: formEmail.trim(),
           name: formName.trim(),
-          role: formRole
-        })
+          role: formRole,
+          clientId: activeClientId,
+          clientIds: isSuperAdmin ? formClientIds : [activeClientId],
+        }),
       });
 
       const data = await res.json();
@@ -71,12 +105,20 @@ export default function UserManager({
         throw new Error(data.error || 'Failed to add user');
       }
 
-      // If user was updated or added
       if (data.user) {
         setUsers(prev => {
-          const exists = prev.some(u => u.id === data.user.id || u.email.toLowerCase() === data.user.email.toLowerCase());
+          const exists = prev.some(
+            u =>
+              u.id === data.user.id ||
+              u.email.toLowerCase() === data.user.email.toLowerCase()
+          );
           if (exists) {
-            return prev.map(u => (u.id === data.user.id || u.email.toLowerCase() === data.user.email.toLowerCase()) ? data.user : u);
+            return prev.map(u =>
+              u.id === data.user.id ||
+              u.email.toLowerCase() === data.user.email.toLowerCase()
+                ? data.user
+                : u
+            );
           }
           return [data.user, ...prev];
         });
@@ -92,18 +134,21 @@ export default function UserManager({
     }
   };
 
-  const handleRoleChange = async (userId: string, newRole: 'ADMIN' | 'ANALYST' | 'VIEWER') => {
+  const handleRoleChange = async (
+    userId: string,
+    newRole: 'SUPER_ADMIN' | 'ADMIN' | 'ANALYST' | 'VIEWER'
+  ) => {
     try {
       const res = await fetch('/api/users', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: userId, role: newRole })
+        body: JSON.stringify({ id: userId, role: newRole }),
       });
       if (res.ok) {
-        setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        setUsers(prev => prev.map(u => (u.id === userId ? { ...u, role: newRole } : u)));
       }
     } catch (e) {
-      console.error("Failed to update role:", e);
+      console.error('Failed to update role:', e);
     }
   };
 
@@ -115,7 +160,7 @@ export default function UserManager({
     setDeletingId(userId);
     try {
       const res = await fetch(`/api/users?id=${userId}`, {
-        method: 'DELETE'
+        method: 'DELETE',
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -133,14 +178,18 @@ export default function UserManager({
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredUsers = users.filter(
+    u =>
+      u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      u.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const availableRoles: ('SUPER_ADMIN' | 'ADMIN' | 'ANALYST' | 'VIEWER')[] = isSuperAdmin
+    ? ['SUPER_ADMIN', 'ADMIN', 'ANALYST', 'VIEWER']
+    : ['ADMIN', 'ANALYST', 'VIEWER'];
 
   return (
     <div className="space-y-4">
-      {/* Alert Notification */}
       {successMessage && (
         <div className="flex items-center gap-2 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-sm font-medium animate-in fade-in">
           <Check className="h-4 w-4 text-emerald-600 shrink-0" />
@@ -148,17 +197,16 @@ export default function UserManager({
         </div>
       )}
 
-      {/* Main Card */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         {/* Header toolbar */}
         <div className="p-4 sm:p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
           <div>
             <h2 className="text-base sm:text-lg font-semibold text-slate-800 flex items-center gap-2">
               <Shield className="h-5 w-5 text-[#6B4BC8] shrink-0" />
-              Authorized Team Members
+              Authorized Team Members ({activeClientName})
             </h2>
             <p className="text-xs sm:text-sm text-slate-500">
-              Users authorized to log into the Kids Dental Specialists SEO & LLM Dashboard.
+              Manage Super Admins, Client Admins, Analysts, and Viewers.
             </p>
           </div>
 
@@ -169,14 +217,14 @@ export default function UserManager({
                 type="text"
                 placeholder="Search users..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={e => setSearchTerm(e.target.value)}
                 className="w-full sm:w-auto pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8]"
               />
             </div>
             {isAdmin && (
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className="inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-xs sm:text-sm font-semibold shadow-xs shrink-0"
+                className="inline-flex items-center justify-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-xs sm:text-sm font-semibold shadow-xs shrink-0 cursor-pointer"
               >
                 <UserPlus className="h-4 w-4" />
                 Add User
@@ -188,7 +236,9 @@ export default function UserManager({
         {!isAdmin && (
           <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2.5 text-xs text-amber-800 font-medium flex items-center gap-2">
             <AlertCircle className="h-4 w-4 text-amber-600 shrink-0" />
-            <span>Viewing in read-only mode. Administrator privileges are required to invite or modify team members.</span>
+            <span>
+              Viewing in read-only mode. Administrator privileges are required to invite or modify team members.
+            </span>
           </div>
         )}
 
@@ -199,6 +249,9 @@ export default function UserManager({
               <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-semibold">
                 <th className="py-3 px-4 sm:px-6">User</th>
                 <th className="py-3 px-4 sm:px-6">Role / Permissions</th>
+                {isSuperAdmin && allClients.length > 1 && (
+                  <th className="py-3 px-4 sm:px-6 hidden md:table-cell">Assigned Clients</th>
+                )}
                 <th className="py-3 px-4 sm:px-6 hidden sm:table-cell">Status</th>
                 <th className="py-3 px-4 sm:px-6 text-right">Actions</th>
               </tr>
@@ -206,12 +259,12 @@ export default function UserManager({
             <tbody className="divide-y divide-slate-100 text-sm">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-slate-500">
+                  <td colSpan={5} className="py-8 text-center text-slate-500">
                     No users match your search.
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((user) => (
+                filteredUsers.map(user => (
                   <tr key={user.id} className="hover:bg-slate-50/60 transition-colors">
                     {/* User info */}
                     <td className="py-3.5 px-4 sm:py-4 sm:px-6">
@@ -239,34 +292,66 @@ export default function UserManager({
 
                     {/* Role dropdown or badge */}
                     <td className="py-3.5 px-4 sm:py-4 sm:px-6">
-                      {isAdmin ? (
+                      {isAdmin && (isSuperAdmin || user.role !== 'SUPER_ADMIN') ? (
                         <select
                           value={user.role}
-                          onChange={(e) => handleRoleChange(user.id, e.target.value as any)}
+                          onChange={e => handleRoleChange(user.id, e.target.value as any)}
                           className={`text-xs font-semibold px-2 sm:px-2.5 py-1 rounded-md border cursor-pointer focus:outline-none transition-colors ${
-                            user.role === 'ADMIN'
+                            user.role === 'SUPER_ADMIN'
+                              ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                              : user.role === 'ADMIN'
                               ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
                               : user.role === 'ANALYST'
                               ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
                               : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
                           }`}
                         >
-                          <option value="ADMIN">ADMIN</option>
-                          <option value="ANALYST">ANALYST</option>
-                          <option value="VIEWER">VIEWER</option>
+                          {availableRoles.map(r => (
+                            <option key={r} value={r}>
+                              {r === 'SUPER_ADMIN' ? 'SUPER ADMIN (All Sites)' : r}
+                            </option>
+                          ))}
                         </select>
                       ) : (
-                        <span className={`inline-flex px-2.5 py-0.5 rounded text-xs font-semibold ${
-                          user.role === 'ADMIN'
-                            ? 'bg-purple-50 text-purple-700 border border-purple-200'
-                            : user.role === 'ANALYST'
-                            ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        }`}>
-                          {user.role}
+                        <span
+                          className={`inline-flex px-2.5 py-0.5 rounded text-xs font-semibold ${
+                            user.role === 'SUPER_ADMIN'
+                              ? 'bg-indigo-100 text-indigo-800 border border-indigo-300'
+                              : user.role === 'ADMIN'
+                              ? 'bg-purple-50 text-purple-700 border border-purple-200'
+                              : user.role === 'ANALYST'
+                              ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          }`}
+                        >
+                          {user.role === 'SUPER_ADMIN' ? 'SUPER ADMIN' : user.role}
                         </span>
                       )}
                     </td>
+
+                    {isSuperAdmin && allClients.length > 1 && (
+                      <td className="py-3.5 px-4 sm:py-4 sm:px-6 hidden md:table-cell">
+                        {user.role === 'SUPER_ADMIN' ? (
+                          <span className="text-xs font-semibold text-indigo-700">
+                            All Clients (Global)
+                          </span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {(user.clientIds || ['kids-dentist']).map(cid => {
+                              const found = allClients.find(c => c.id === cid);
+                              return (
+                                <span
+                                  key={cid}
+                                  className="text-[11px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-medium"
+                                >
+                                  {found?.name || cid}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </td>
+                    )}
 
                     {/* Status */}
                     <td className="py-3.5 px-4 sm:py-4 sm:px-6 hidden sm:table-cell">
@@ -278,11 +363,13 @@ export default function UserManager({
 
                     {/* Actions */}
                     <td className="py-3.5 px-4 sm:py-4 sm:px-6 text-right">
-                      {isAdmin && user.email.toLowerCase() !== currentUserEmail.toLowerCase() ? (
+                      {isAdmin &&
+                      user.email.toLowerCase() !== currentUserEmail.toLowerCase() &&
+                      (isSuperAdmin || user.role !== 'SUPER_ADMIN') ? (
                         <button
                           onClick={() => handleDeleteUser(user.id, user.email)}
                           disabled={deletingId === user.id}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                           title="Revoke User Access"
                         >
                           {deletingId === user.id ? (
@@ -293,7 +380,9 @@ export default function UserManager({
                         </button>
                       ) : (
                         <span className="text-xs text-slate-400 italic">
-                          {user.email.toLowerCase() === currentUserEmail.toLowerCase() ? 'You' : '—'}
+                          {user.email.toLowerCase() === currentUserEmail.toLowerCase()
+                            ? 'You'
+                            : 'Protected'}
                         </span>
                       )}
                     </td>
@@ -309,7 +398,6 @@ export default function UserManager({
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md overflow-hidden">
-            {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-purple-100 text-[#6B4BC8] flex items-center justify-center font-bold">
@@ -317,7 +405,9 @@ export default function UserManager({
                 </div>
                 <div>
                   <h3 className="font-semibold text-slate-800 text-base">Add Authorized User</h3>
-                  <p className="text-xs text-slate-500">Grant dashboard access to a team member</p>
+                  <p className="text-xs text-slate-500">
+                    Grant dashboard access for {activeClientName}
+                  </p>
                 </div>
               </div>
               <button
@@ -328,7 +418,6 @@ export default function UserManager({
               </button>
             </div>
 
-            {/* Modal Form */}
             <form onSubmit={handleAddUser} className="p-6 space-y-4">
               {errorMessage && (
                 <div className="flex items-center gap-2 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-xs font-medium">
@@ -345,7 +434,7 @@ export default function UserManager({
                   type="text"
                   placeholder="e.g. Dr. Sonia Gutierrez"
                   value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
+                  onChange={e => setFormName(e.target.value)}
                   className="w-full text-sm px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8] text-slate-800 placeholder-slate-400"
                 />
               </div>
@@ -357,44 +446,74 @@ export default function UserManager({
                 <input
                   type="email"
                   required
-                  placeholder="e.g. member@kidsdds.com"
+                  placeholder="e.g. member@example.com"
                   value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
+                  onChange={e => setFormEmail(e.target.value)}
                   className="w-full text-sm px-3.5 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8] text-slate-800 placeholder-slate-400"
                 />
-                <p className="text-[11px] text-slate-500 mt-1">
-                  The user will log in via Google OAuth using this exact address.
-                </p>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Role & Permissions
+                  Role &amp; Permissions
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['ADMIN', 'ANALYST', 'VIEWER'] as const).map((r) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {availableRoles.map(r => (
                     <button
                       key={r}
                       type="button"
                       onClick={() => setFormRole(r)}
-                      className={`py-2 px-3 text-xs font-semibold rounded-lg border text-center transition-all ${
+                      className={`py-2 px-2 text-xs font-semibold rounded-lg border text-center transition-all cursor-pointer ${
                         formRole === r
                           ? 'bg-[#6B4BC8] text-white border-[#6B4BC8] shadow-xs'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      {r}
+                      {r === 'SUPER_ADMIN' ? 'SUPER' : r}
                     </button>
                   ))}
                 </div>
                 <div className="mt-2 p-2.5 bg-slate-50 rounded-lg text-[11px] text-slate-600 border border-slate-100">
-                  {formRole === 'ADMIN' && 'Full administrator control over all settings, team access, and cron workflows.'}
-                  {formRole === 'ANALYST' && 'Can run audits, trigger AI tests, and export Q&A spreadsheets.'}
-                  {formRole === 'VIEWER' && 'Read-only access to view charts, rankings, and reports.'}
+                  {formRole === 'SUPER_ADMIN' &&
+                    'Global Super Admin control across all client sites, users, and configurations.'}
+                  {formRole === 'ADMIN' &&
+                    `Client Administrator control over settings, questions, and team users for ${activeClientName}.`}
+                  {formRole === 'ANALYST' &&
+                    'Can run audits, trigger AI follow-up queries, and export Q&A spreadsheets.'}
+                  {formRole === 'VIEWER' &&
+                    'Read-only access to view charts, rankings, and reports.'}
                 </div>
               </div>
 
-              {/* Modal Buttons */}
+              {isSuperAdmin && allClients.length > 1 && formRole !== 'SUPER_ADMIN' && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                    <Building2 className="h-3.5 w-3.5 text-slate-400" />
+                    Assign Client Access
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {allClients.map(c => {
+                      const checked = formClientIds.includes(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => toggleFormClient(c.id)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium border cursor-pointer ${
+                            checked
+                              ? 'bg-purple-50 border-[#6B4BC8] text-[#6B4BC8] font-semibold'
+                              : 'bg-white border-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {checked ? '✓ ' : ''}
+                          {c.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="pt-4 flex items-center justify-end gap-3 border-t border-slate-100">
                 <button
                   type="button"
@@ -406,7 +525,7 @@ export default function UserManager({
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {isLoading ? (
                     <>

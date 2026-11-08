@@ -13,7 +13,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Info
+  Info,
+  Play,
+  HelpCircle,
 } from 'lucide-react';
 import type { LLMBudgetConfig, LLMPreset, LLMFrequency } from '@/lib/ai-harness/settings';
 
@@ -29,6 +31,8 @@ interface Props {
   totalTracked: number;
   masteredList: MasteredQuestionSummary[];
   isAdmin: boolean;
+  clientId?: string;
+  clientName?: string;
 }
 
 const PRESET_CARDS: {
@@ -56,13 +60,13 @@ const PRESET_CARDS: {
     questionsPerRun: 3,
     smartSkipMastered: true,
     icon: PiggyBank,
-    accentColor: 'emerald'
+    accentColor: 'emerald',
   },
   {
     id: 'balanced',
     title: 'Balanced',
     badge: 'Recommended Default',
-    subtitle: 'Steady multi-town rotation at ~85% lower cost',
+    subtitle: 'Steady regional rotation at ~85% lower cost',
     frequencyLabel: 'Every Other Day',
     questionsLabel: '6 questions / run',
     skipLabel: 'Smart Skip ON (30d recheck)',
@@ -70,7 +74,7 @@ const PRESET_CARDS: {
     questionsPerRun: 6,
     smartSkipMastered: true,
     icon: Scale,
-    accentColor: 'purple'
+    accentColor: 'purple',
   },
   {
     id: 'maximize_inquiries',
@@ -83,30 +87,40 @@ const PRESET_CARDS: {
     questionsPerRun: 15,
     smartSkipMastered: false,
     icon: Zap,
-    accentColor: 'amber'
-  }
+    accentColor: 'amber',
+  },
 ];
 
 export default function LLMBudgetSettings({
   initialConfig,
   totalTracked,
   masteredList,
-  isAdmin
+  isAdmin,
+  clientId = 'kids-dentist',
+  clientName = 'Kids Dentist',
 }: Props) {
   const [preset, setPreset] = useState<LLMPreset>(initialConfig.preset || 'balanced');
-  const [frequency, setFrequency] = useState<LLMFrequency>(initialConfig.frequency || 'every_other_day');
-  const [questionsPerRun, setQuestionsPerRun] = useState<number>(initialConfig.questionsPerRun || 6);
+  const [frequency, setFrequency] = useState<LLMFrequency>(
+    initialConfig.frequency || 'every_other_day'
+  );
+  const [questionsPerRun, setQuestionsPerRun] = useState<number>(
+    initialConfig.questionsPerRun || 6
+  );
   const [smartSkipMastered, setSmartSkipMastered] = useState<boolean>(
     initialConfig.smartSkipMastered ?? true
+  );
+  const [autoFollowUpNotMentioned, setAutoFollowUpNotMentioned] = useState<boolean>(
+    initialConfig.autoFollowUpNotMentioned ?? false
   );
   const [recheckDays] = useState<number>(initialConfig.recheckDays || 30);
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isRunningNow, setIsRunningNow] = useState(false);
   const [savedNotice, setSavedNotice] = useState('');
   const [errorNotice, setErrorNotice] = useState('');
   const [showMasteredDetails, setShowMasteredDetails] = useState(false);
 
-  const selectPresetCard = (card: typeof PRESET_CARDS[number]) => {
+  const selectPresetCard = (card: (typeof PRESET_CARDS)[number]) => {
     if (!isAdmin) return;
     setPreset(card.id);
     setFrequency(card.frequency);
@@ -143,12 +157,14 @@ export default function LLMBudgetSettings({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          preset: 'custom', // Let server match preset or mark custom from exact values
+          clientId,
+          preset: 'custom',
           frequency,
           questionsPerRun,
           smartSkipMastered,
-          recheckDays
-        })
+          autoFollowUpNotMentioned,
+          recheckDays,
+        }),
       });
 
       const data = await res.json();
@@ -160,12 +176,36 @@ export default function LLMBudgetSettings({
       if (data.config?.preset) {
         setPreset(data.config.preset);
       }
-      setSavedNotice('AI Visibility schedule & credit budget settings saved.');
+      setSavedNotice('AI Visibility schedule, follow-up & credit budget settings saved.');
       setTimeout(() => setSavedNotice(''), 4000);
     } catch (e: any) {
       setErrorNotice(e.message || 'Network error while saving');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleRunNow = async () => {
+    if (!isAdmin || isRunningNow) return;
+    setIsRunningNow(true);
+    setSavedNotice('');
+    setErrorNotice('');
+
+    try {
+      const res = await fetch(`/api/cron/llm-tracker?force=true&clientId=${encodeURIComponent(clientId)}`);
+      const data = await res.json();
+      if (!res.ok && !data.scores) {
+        throw new Error(data.error || 'Failed to execute LLM run');
+      }
+      const testedRegions = (data.tested || []).join(', ');
+      setSavedNotice(
+        `LLM Run Completed (${data.questionsAsked || 0} questions in ${testedRegions || 'current region'}). Refreshing...`
+      );
+      setTimeout(() => window.location.reload(), 1500);
+    } catch (e: any) {
+      setErrorNotice(e.message || 'Error running LLM batch');
+    } finally {
+      setIsRunningNow(false);
     }
   };
 
@@ -176,31 +216,53 @@ export default function LLMBudgetSettings({
         <div>
           <h2 className="text-base sm:text-lg font-semibold text-slate-800 flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-[#6B4BC8] shrink-0" />
-            AI Visibility Credit Budget & Schedule
+            AI Visibility Credit Budget &amp; Schedule ({clientName})
           </h2>
           <p className="text-xs sm:text-sm text-slate-500">
-            Control how often LLMs are queried, how many rotating questions run per batch, and smart-skipping of mastered topics.
+            Control how often LLMs are queried, how many rotating questions run per batch, and automatic follow-up when not mentioned.
           </p>
         </div>
 
         {isAdmin && (
-          <button
-            onClick={handleSave}
-            disabled={isSaving}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-xs sm:text-sm font-semibold shadow-xs disabled:opacity-50 shrink-0 cursor-pointer"
-          >
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Check className="h-4 w-4" />
-                Save LLM Settings
-              </>
-            )}
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleRunNow}
+              disabled={isRunningNow || isSaving}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors text-xs sm:text-sm font-semibold shadow-xs disabled:opacity-50 cursor-pointer"
+              title="Execute a live LLM visibility batch right now and advance the regional rotation"
+            >
+              {isRunningNow ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Running Batch...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" />
+                  Run Test Batch Now
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={handleSave}
+              disabled={isSaving}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#6B4BC8] hover:bg-[#5a3da8] text-white rounded-lg transition-colors text-xs sm:text-sm font-semibold shadow-xs disabled:opacity-50 shrink-0 cursor-pointer"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Check className="h-4 w-4" />
+                  Save LLM Settings
+                </>
+              )}
+            </button>
+          </div>
         )}
       </div>
 
@@ -224,7 +286,7 @@ export default function LLMBudgetSettings({
             1. Choose an Optimization Level
           </label>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
-            {PRESET_CARDS.map((card) => {
+            {PRESET_CARDS.map(card => {
               const Icon = card.icon;
               const isSelected = preset === card.id;
               return (
@@ -244,9 +306,7 @@ export default function LLMBudgetSettings({
                       <div className="flex items-center gap-2">
                         <div
                           className={`p-2 rounded-lg ${
-                            isSelected
-                              ? 'bg-[#6B4BC8] text-white'
-                              : 'bg-slate-100 text-slate-600'
+                            isSelected ? 'bg-[#6B4BC8] text-white' : 'bg-slate-100 text-slate-600'
                           }`}
                         >
                           <Icon className="h-4 w-4" />
@@ -299,7 +359,7 @@ export default function LLMBudgetSettings({
             <div className="flex items-center gap-2">
               <Sliders className="h-4 w-4 text-[#6B4BC8]" />
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                2. Fine-Tune Schedule & Rotation
+                2. Fine-Tune Schedule, Rotation &amp; Follow-Ups
               </span>
             </div>
             {preset === 'custom' && (
@@ -309,7 +369,7 @@ export default function LLMBudgetSettings({
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Frequency Selector */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1.5">
@@ -319,8 +379,12 @@ export default function LLMBudgetSettings({
               <select
                 disabled={!isAdmin}
                 value={frequency}
-                onChange={(e) =>
-                  handleCustomChange(e.target.value as LLMFrequency, questionsPerRun, smartSkipMastered)
+                onChange={e =>
+                  handleCustomChange(
+                    e.target.value as LLMFrequency,
+                    questionsPerRun,
+                    smartSkipMastered
+                  )
                 }
                 className="w-full text-xs sm:text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8]"
               >
@@ -339,7 +403,7 @@ export default function LLMBudgetSettings({
               <select
                 disabled={!isAdmin}
                 value={questionsPerRun}
-                onChange={(e) =>
+                onChange={e =>
                   handleCustomChange(frequency, Number(e.target.value), smartSkipMastered)
                 }
                 className="w-full text-xs sm:text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#6B4BC8]/20 focus:border-[#6B4BC8]"
@@ -347,6 +411,7 @@ export default function LLMBudgetSettings({
                 <option value={3}>3 questions / run (Minimum Burn)</option>
                 <option value={5}>5 questions / run</option>
                 <option value={6}>6 questions / run (Balanced)</option>
+                <option value={8}>8 questions / run</option>
                 <option value={10}>10 questions / run</option>
                 <option value={15}>15 questions / run (Full Batch)</option>
               </select>
@@ -355,7 +420,7 @@ export default function LLMBudgetSettings({
             {/* Smart Skip Toggle */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Smart Skip Highly Relevant
+                Smart Skip Mastered
               </label>
               <button
                 type="button"
@@ -369,9 +434,7 @@ export default function LLMBudgetSettings({
                     : 'bg-white border-slate-200 text-slate-700'
                 }`}
               >
-                <span>
-                  {smartSkipMastered ? 'Enabled (30-day recheck)' : 'Disabled (Ask every time)'}
-                </span>
+                <span>{smartSkipMastered ? '30-day recheck' : 'Ask every time'}</span>
                 <span
                   className={`px-2 py-0.5 rounded text-[11px] font-bold ${
                     smartSkipMastered
@@ -383,6 +446,36 @@ export default function LLMBudgetSettings({
                 </span>
               </button>
             </div>
+
+            {/* Auto Follow-Up When Not Mentioned Toggle */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5 flex items-center gap-1">
+                <HelpCircle className="h-3.5 w-3.5 text-[#6B4BC8]" />
+                Auto &ldquo;Why Not Mentioned&rdquo;
+              </label>
+              <button
+                type="button"
+                disabled={!isAdmin}
+                onClick={() => setAutoFollowUpNotMentioned(!autoFollowUpNotMentioned)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-xs sm:text-sm font-medium transition-colors cursor-pointer ${
+                  autoFollowUpNotMentioned
+                    ? 'bg-purple-50 border-[#6B4BC8] text-purple-900'
+                    : 'bg-white border-slate-200 text-slate-700'
+                }`}
+                title="When enabled, automatically asks the LLM why the client was not included whenever a result is Not Mentioned"
+              >
+                <span>{autoFollowUpNotMentioned ? 'Auto Ask Why' : 'On-Demand Only'}</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                    autoFollowUpNotMentioned
+                      ? 'bg-[#6B4BC8] text-white'
+                      : 'bg-slate-200 text-slate-600'
+                  }`}
+                >
+                  {autoFollowUpNotMentioned ? 'AUTO' : 'MANUAL'}
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Info Note & Mastered Questions Summary */}
@@ -390,7 +483,8 @@ export default function LLMBudgetSettings({
             <div className="flex items-start sm:items-center gap-2">
               <Info className="h-4 w-4 text-[#6B4BC8] shrink-0 mt-0.5 sm:mt-0" />
               <span>
-                <strong>Carry-Forward Scoring:</strong> Questions where ChatGPT, Claude, and Gemini all recommend Kids Dentist are marked{' '}
+                <strong>Carry-Forward Scoring:</strong> Questions where ChatGPT, Claude, and Gemini all recommend{' '}
+                <strong>{clientName}</strong> are marked{' '}
                 <strong className="text-emerald-700">Mastered</strong>, skipped for 30 days, and carried forward in your trend score.
               </span>
             </div>
@@ -418,10 +512,10 @@ export default function LLMBudgetSettings({
             <div className="pt-2">
               <div className="bg-white rounded-lg border border-slate-200 p-3 max-h-48 overflow-y-auto">
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                  Currently Mastered Questions (100% Across ChatGPT, Claude & Gemini — Auto-Skipped for 30 Days)
+                  Currently Mastered Questions (100% Across ChatGPT, Claude &amp; Gemini — Auto-Skipped for 30 Days)
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {masteredList.map((item) => (
+                  {masteredList.map(item => (
                     <span
                       key={item.key}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium"

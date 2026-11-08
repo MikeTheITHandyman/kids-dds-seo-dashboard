@@ -6,36 +6,45 @@ import { aggregateData } from '@/lib/data-aggregation';
 import { fetchGA4Data, fetchGA4CityData } from '@/lib/ga4-api';
 import { getDateRangeBounds, getPreviousPeriod, mergeComparisonData } from '@/lib/date-utils';
 import { resolveFilterParams } from '@/lib/filter-prefs';
+import { getActiveClientConfig } from '@/lib/clients';
 import { Suspense } from 'react';
 
-const GA4_PROPERTY_ID = '554533089';
+export const dynamic = 'force-dynamic';
 
 export default async function WebAnalytics({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string; compare?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    granularity?: string;
+    start?: string;
+    end?: string;
+    compare?: string;
+  }>;
 }) {
-  const resolvedParams = await searchParams;
+  const [resolvedParams, activeClient] = await Promise.all([
+    searchParams,
+    getActiveClientConfig(),
+  ]);
   const { range, granularity, start, end, compare } = await resolveFilterParams(resolvedParams);
+
+  const propertyId = activeClient.ga4PropertyId || '';
 
   const today = new Date();
   const { ga4StartDate, ga4EndDate } = getDateRangeBounds(range, today, start, end);
   const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
-  // Fetch real data from Google Analytics 4
   const [ga4Result, topCities, prevGa4Result] = await Promise.all([
-    fetchGA4Data(GA4_PROPERTY_ID, ga4StartDate, ga4EndDate),
-    fetchGA4CityData(GA4_PROPERTY_ID, ga4StartDate, ga4EndDate),
-    compare && prevStart && prevEnd
-      ? fetchGA4Data(GA4_PROPERTY_ID, prevStart, prevEnd)
+    fetchGA4Data(propertyId, ga4StartDate, ga4EndDate),
+    fetchGA4CityData(propertyId, ga4StartDate, ga4EndDate),
+    compare && prevStart && prevEnd && propertyId
+      ? fetchGA4Data(propertyId, prevStart, prevEnd)
       : Promise.resolve({ timeSeriesData: [] }),
   ]);
 
   let timeSeriesData = ga4Result.timeSeriesData || [];
   let prevTimeSeriesData = prevGa4Result.timeSeriesData || [];
 
-  // Apply granularity grouping (sum for traffic volume)
-  // Skip aggregation if we are viewing 1D, so we can see the hourly breakdown
   if (timeSeriesData.length > 0 && range !== '1D') {
     timeSeriesData = aggregateData(timeSeriesData, granularity, 'sum');
   }
@@ -44,25 +53,39 @@ export default async function WebAnalytics({
     if (prevTimeSeriesData.length > 0 && range !== '1D') {
       prevTimeSeriesData = aggregateData(prevTimeSeriesData, granularity, 'sum');
     }
-    timeSeriesData = mergeComparisonData(timeSeriesData, prevTimeSeriesData, ['Users', 'Sessions', 'Pageviews']);
+    timeSeriesData = mergeComparisonData(timeSeriesData, prevTimeSeriesData, [
+      'Users',
+      'Sessions',
+      'Pageviews',
+    ]);
   }
 
   const formatNum = (num: number) => num.toLocaleString('en-US');
 
-  const totals = ga4Result.totals || { users: 0, sessions: 0, pageViews: 0, avgEngagementRate: '0%' };
+  const totals = ga4Result.totals || {
+    users: 0,
+    sessions: 0,
+    pageViews: 0,
+    avgEngagementRate: '0%',
+  };
+  const exportPrefix = activeClient.name.replace(/[^a-zA-Z0-9]+/g, '_');
 
   return (
     <div id="dashboard-content" className="space-y-4 sm:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Traffic &amp; Web Analytics</h1>
-          <p className="text-xs sm:text-sm text-slate-500">Google Analytics 4 Metrics</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
+            Traffic &amp; Web Analytics — {activeClient.name}
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Google Analytics 4 Metrics (Property ID: {propertyId || 'Not Configured'})
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
-          <ExportControls data={timeSeriesData} filename="Kids_DDS_Web_Analytics" />
+          <ExportControls data={timeSeriesData} filename={`${exportPrefix}_Web_Analytics`} />
         </div>
       </div>
 
@@ -76,7 +99,9 @@ export default async function WebAnalytics({
       <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
         <div className="mb-3 sm:mb-4">
           <h3 className="text-base sm:text-lg font-semibold text-slate-800">Traffic Overview</h3>
-          <p className="text-xs sm:text-sm text-slate-500">Users, Sessions, and Pageviews over time</p>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Users, Sessions, and Pageviews over time
+          </p>
         </div>
         <VisibilityChart
           data={timeSeriesData}
@@ -96,7 +121,9 @@ export default async function WebAnalytics({
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 sm:p-6 border-b border-slate-100">
             <h3 className="text-base sm:text-lg font-semibold text-slate-800">Top Local Cities</h3>
-            <p className="text-xs sm:text-sm text-slate-500">Where your visitors are physically located</p>
+            <p className="text-xs sm:text-sm text-slate-500">
+              Where your visitors are physically located
+            </p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-xs sm:text-sm text-left text-slate-600">
@@ -116,8 +143,13 @@ export default async function WebAnalytics({
                   </tr>
                 )}
                 {topCities.map((row: any, i: number) => (
-                  <tr key={i} className="bg-white border-b border-slate-100 hover:bg-slate-50">
-                    <td className="px-4 sm:px-6 py-3 sm:py-4 font-medium text-slate-800">{row.city}</td>
+                  <tr
+                    key={i}
+                    className="bg-white border-b border-slate-100 hover:bg-slate-50"
+                  >
+                    <td className="px-4 sm:px-6 py-3 sm:py-4 font-medium text-slate-800">
+                      {row.city}
+                    </td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">{row.sessions}</td>
                     <td className="px-4 sm:px-6 py-3 sm:py-4 text-right">{row.users}</td>
                   </tr>

@@ -11,28 +11,43 @@ import {
   mergeComparisonData,
 } from '@/lib/date-utils';
 import { resolveFilterParams } from '@/lib/filter-prefs';
+import { getActiveClientConfig } from '@/lib/clients';
 import { Suspense } from 'react';
 
-const SITE_URL = 'sc-domain:kidsdds.com';
+export const dynamic = 'force-dynamic';
 
 export default async function SearchVisibility({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string; compare?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    granularity?: string;
+    start?: string;
+    end?: string;
+    compare?: string;
+  }>;
 }) {
-  const resolvedParams = await searchParams;
+  const [resolvedParams, activeClient] = await Promise.all([
+    searchParams,
+    getActiveClientConfig(),
+  ]);
   const { range, granularity, start, end, compare } = await resolveFilterParams(resolvedParams);
+
+  const siteUrl =
+    activeClient.gscSiteUrl || (activeClient.domain ? `sc-domain:${activeClient.domain}` : '');
+  const targetKeywords = (activeClient.targetKeywords || []).map(k => k.toLowerCase());
 
   const today = new Date();
   const { startDate: gscStart, endDate: gscEnd } = getDateRangeBounds(range, today, start, end);
   const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
-  // Fetch real data from Google Search Console
   const [gscResult, queryResult, prevGscResult] = await Promise.all([
-    fetchGSCTrend(SITE_URL, gscStart, gscEnd),
-    fetchTopQueries(SITE_URL, gscStart, gscEnd),
-    compare && prevStart && prevEnd
-      ? fetchGSCTrend(SITE_URL, prevStart, prevEnd)
+    siteUrl
+      ? fetchGSCTrend(siteUrl, gscStart, gscEnd)
+      : Promise.resolve({ timeSeriesData: [], totals: { avgPosition: '0.0', clicks: 0, impressions: 0 } }),
+    siteUrl ? fetchTopQueries(siteUrl, gscStart, gscEnd) : Promise.resolve({ queries: [] }),
+    compare && prevStart && prevEnd && siteUrl
+      ? fetchGSCTrend(siteUrl, prevStart, prevEnd)
       : Promise.resolve({ timeSeriesData: [] }),
   ]);
 
@@ -40,7 +55,7 @@ export default async function SearchVisibility({
   let prevGscData = prevGscResult.timeSeriesData || [];
 
   if (gscData.length === 0) {
-    gscData = buildDateRangeArray(gscStart, gscEnd).map((dateStr) => ({
+    gscData = buildDateRangeArray(gscStart, gscEnd).map(dateStr => ({
       date: dateStr,
       Google: 0,
       Clicks: 0,
@@ -48,7 +63,6 @@ export default async function SearchVisibility({
     }));
   }
 
-  // Apply granularity grouping
   let chartData = aggregateData(gscData, granularity, 'average');
 
   if (compare) {
@@ -59,32 +73,43 @@ export default async function SearchVisibility({
   const avgGoogleRank = gscResult.totals?.avgPosition || '0.0';
   const totalClicks = gscResult.totals?.clicks || 0;
   const totalImpressions = gscResult.totals?.impressions || 0;
+  const exportPrefix = activeClient.name.replace(/[^a-zA-Z0-9]+/g, '_');
 
   return (
     <div id="dashboard-content" className="space-y-4 sm:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Search Engine Visibility</h1>
-          <p className="text-xs sm:text-sm text-slate-500">Live rankings and queries from Google Search Console</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
+            Search Engine Visibility — {activeClient.name}
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Live rankings and queries from Google Search Console ({siteUrl || 'No GSC URL configured'})
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
-          <ExportControls data={chartData} filename="Kids_DDS_Search_Visibility" />
+          <ExportControls data={chartData} filename={`${exportPrefix}_Search_Visibility`} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
         <StatCard title="Google Search Avg Position" value={avgGoogleRank} change={0} />
         <StatCard title="Total Google Clicks" value={totalClicks.toLocaleString()} change={0} />
-        <StatCard title="Total Google Impressions" value={totalImpressions.toLocaleString()} change={0} />
+        <StatCard
+          title="Total Google Impressions"
+          value={totalImpressions.toLocaleString()}
+          change={0}
+        />
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
         <div className="mb-3 sm:mb-4 flex items-center justify-between">
           <div>
-            <h3 className="text-base sm:text-lg font-semibold text-slate-800">Google Position Trend</h3>
+            <h3 className="text-base sm:text-lg font-semibold text-slate-800">
+              Google Position Trend
+            </h3>
             <p className="text-xs sm:text-sm text-slate-500">
               Live daily average search ranking (closer to 1 is better)
             </p>
@@ -102,7 +127,9 @@ export default async function SearchVisibility({
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 sm:p-6 border-b border-slate-100">
           <h3 className="text-base sm:text-lg font-semibold text-slate-800">Top SEO Keywords</h3>
-          <p className="text-xs sm:text-sm text-slate-500">Live queries driving impressions in Google Search</p>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Live queries driving impressions in Google Search
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs sm:text-sm text-left text-slate-600">
@@ -119,14 +146,13 @@ export default async function SearchVisibility({
               {queryResult.queries.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-4 sm:px-6 py-4 text-center text-slate-500">
-                    Not enough data yet from Google Search Console. Check back in a few days.
+                    Not enough data yet from Google Search Console.
                   </td>
                 </tr>
               ) : (
                 queryResult.queries.map((row: any, i: number) => {
-                  const isTarget =
-                    row.query.toLowerCase().includes('pediatric dentist grayslake') ||
-                    row.query.toLowerCase().includes('kids dentist grayslake');
+                  const qLower = row.query.toLowerCase();
+                  const isTarget = targetKeywords.some(tk => qLower.includes(tk));
                   return (
                     <tr
                       key={i}

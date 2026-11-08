@@ -12,33 +12,46 @@ import {
   mergeComparisonData,
 } from '@/lib/date-utils';
 import { resolveFilterParams } from '@/lib/filter-prefs';
+import { DEFAULT_CLIENT_ID, getActiveClientConfig } from '@/lib/clients';
 import { Suspense } from 'react';
 
-const SITE_URL = 'sc-domain:kidsdds.com';
+export const dynamic = 'force-dynamic';
 
 export default async function DashboardOverview({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; granularity?: string; start?: string; end?: string; compare?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    granularity?: string;
+    start?: string;
+    end?: string;
+    compare?: string;
+  }>;
 }) {
-  const resolvedParams = await searchParams;
+  const [resolvedParams, activeClient] = await Promise.all([
+    searchParams,
+    getActiveClientConfig(),
+  ]);
   const { range, granularity, start, end, compare } = await resolveFilterParams(resolvedParams);
+
+  const siteUrl = activeClient.gscSiteUrl || (activeClient.domain ? `sc-domain:${activeClient.domain}` : '');
 
   const today = new Date();
   const { startDate: fsStart, endDate: fsEnd } = getDateRangeBounds(range, today, start, end);
   const { prevStart, prevEnd } = getPreviousPeriod(range, today, start, end);
 
-  // Fetch real Google SEO Rankings from Search Console using strictly formatted dates
   const [gscResult, prevGscResult] = await Promise.all([
-    fetchGSCTrend(SITE_URL, fsStart, fsEnd),
-    compare && prevStart && prevEnd
-      ? fetchGSCTrend(SITE_URL, prevStart, prevEnd)
+    siteUrl
+      ? fetchGSCTrend(siteUrl, fsStart, fsEnd)
+      : Promise.resolve({ timeSeriesData: [], totals: { avgPosition: '0.0', clicks: 0, impressions: 0 } }),
+    compare && prevStart && prevEnd && siteUrl
+      ? fetchGSCTrend(siteUrl, prevStart, prevEnd)
       : Promise.resolve({ timeSeriesData: [] }),
   ]);
   let gscData = gscResult.timeSeriesData || [];
   let prevGscData = prevGscResult.timeSeriesData || [];
 
-  // Fetch real LLM Visibility scores from Firebase
+  // Fetch LLM Visibility scores from Firebase for activeClient
   let llmDataMap: Record<string, any> = {};
   let prevLlmDataMap: Record<string, any> = {};
 
@@ -52,6 +65,9 @@ export default async function DashboardOverview({
 
       llmSnapshot.forEach((doc: any) => {
         const data = doc.data();
+        const docClientId = data.clientId || DEFAULT_CLIENT_ID;
+        if (docClientId !== activeClient.id) return;
+
         llmDataMap[data.date] = {
           ChatGPT: data.chatgpt_score || 0,
           Claude: data.claude_score || 0,
@@ -68,6 +84,9 @@ export default async function DashboardOverview({
 
         prevSnapshot.forEach((doc: any) => {
           const data = doc.data();
+          const docClientId = data.clientId || DEFAULT_CLIENT_ID;
+          if (docClientId !== activeClient.id) return;
+
           prevLlmDataMap[data.date] = {
             ChatGPT: data.chatgpt_score || 0,
             Claude: data.claude_score || 0,
@@ -80,10 +99,8 @@ export default async function DashboardOverview({
     console.error('Error fetching LLM data from Firebase', e);
   }
 
-  // If the site is too new, GSC might return no data yet.
-  // Generate a dummy array for the exact [fsStart, fsEnd] window so the chart doesn't break.
   if (gscData.length === 0) {
-    gscData = buildDateRangeArray(fsStart, fsEnd).map((dateStr) => ({
+    gscData = buildDateRangeArray(fsStart, fsEnd).map(dateStr => ({
       date: dateStr,
       Google: 0,
       Clicks: 0,
@@ -91,7 +108,6 @@ export default async function DashboardOverview({
     }));
   }
 
-  // Merge GSC data with Firebase LLM Data (carrying forward last known LLM score on off-days)
   let lastKnown = { ChatGPT: 0, Claude: 0, Gemini: 0 };
   const sortedDatesWithData = Object.keys(llmDataMap).sort();
   if (sortedDatesWithData.length > 0) {
@@ -99,7 +115,7 @@ export default async function DashboardOverview({
   }
   const earliestDataDate = sortedDatesWithData[0] || '9999-99-99';
 
-  let mergedData = gscData.map((row) => {
+  let mergedData = gscData.map(row => {
     if (llmDataMap[row.date]) {
       lastKnown = { ...llmDataMap[row.date] };
     }
@@ -112,13 +128,12 @@ export default async function DashboardOverview({
     };
   });
 
-  // Apply granularity grouping (average for ranking scores)
   if (mergedData.length > 0) {
     mergedData = aggregateData(mergedData, granularity, 'average');
   }
 
   if (compare) {
-    let mergedPrevData = prevGscData.map((row) => ({
+    let mergedPrevData = prevGscData.map(row => ({
       ...row,
       ChatGPT: prevLlmDataMap[row.date]?.ChatGPT || 0,
       Claude: prevLlmDataMap[row.date]?.Claude || 0,
@@ -129,12 +144,16 @@ export default async function DashboardOverview({
       mergedPrevData = aggregateData(mergedPrevData, granularity, 'average');
     }
 
-    mergedData = mergeComparisonData(mergedData, mergedPrevData, ['Google', 'ChatGPT', 'Claude', 'Gemini']);
+    mergedData = mergeComparisonData(mergedData, mergedPrevData, [
+      'Google',
+      'ChatGPT',
+      'Claude',
+      'Gemini',
+    ]);
   }
 
   const avgGoogleRank = gscResult.totals?.avgPosition || '0.0';
 
-  // Calculate averages for the cards
   let totalChatGPT = 0,
     totalClaude = 0;
   let count = 0;
@@ -146,26 +165,31 @@ export default async function DashboardOverview({
 
   const avgChatGPT = count > 0 ? Math.round(totalChatGPT / count) : 0;
   const avgClaude = count > 0 ? Math.round(totalClaude / count) : 0;
+  const exportPrefix = activeClient.name.replace(/[^a-zA-Z0-9]+/g, '_');
 
   return (
     <div id="dashboard-content" className="space-y-4 sm:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">Overview</h1>
-          <p className="text-xs sm:text-sm text-slate-500">Combined SEO and LLM Visibility Metrics</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-slate-800">
+            Overview — {activeClient.name}
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500">
+            Combined SEO and LLM Visibility Metrics ({activeClient.domain || activeClient.primaryLocation})
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
           <Suspense fallback={<div className="h-8 w-32 bg-slate-100 rounded animate-pulse"></div>}>
             <DateFilter />
           </Suspense>
-          <ExportControls data={mergedData} filename="Kids_DDS_Overview" />
+          <ExportControls data={mergedData} filename={`${exportPrefix}_Overview`} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-6">
         <StatCard title="Google Search Avg Position" value={avgGoogleRank} change={0} />
-        <StatCard title="ChatGPT Visibility" value={avgChatGPT.toString()} change={0} />
-        <StatCard title="Claude Visibility" value={avgClaude.toString()} change={0} />
+        <StatCard title="ChatGPT Visibility" value={avgChatGPT.toString() + '%'} change={0} />
+        <StatCard title="Claude Visibility" value={avgClaude.toString() + '%'} change={0} />
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-xs">
@@ -173,7 +197,7 @@ export default async function DashboardOverview({
           <div>
             <h3 className="text-base sm:text-lg font-semibold text-slate-800">Visibility Trend</h3>
             <p className="text-xs sm:text-sm text-slate-500">
-              Google rankings are LIVE. LLM visibility updates nightly via cron.
+              Google rankings are LIVE ({siteUrl || 'GSC not set'}). LLM visibility updates via scheduled or manual runs.
             </p>
           </div>
         </div>

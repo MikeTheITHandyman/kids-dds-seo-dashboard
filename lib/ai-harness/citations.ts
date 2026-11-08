@@ -1,7 +1,9 @@
 // Citation and Competitor Extraction Engine
+import type { ClientConfig } from '@/lib/clients';
 
 export interface CitationAnalysis {
-  kidsddsCited: boolean;
+  kidsddsCited: boolean; // Kept for backwards compatibility (represents clientDomainCited)
+  clientCited: boolean;
   citedDomains: string[];
   citedUrls: string[];
   competitors: string[]; // List of extracted competitor practice names
@@ -38,7 +40,7 @@ export const DIRECTORY_DOMAINS = new Set([
 ]);
 
 // Common Lake County / regional competitors for verification and extraction
-const KNOWN_COMPETITORS = [
+const DEFAULT_KNOWN_COMPETITORS = [
   "Affiliated Dental Specialists",
   "Associated Dental Specialists of Long Grove",
   "Gurnee Pediatric Dentistry",
@@ -59,7 +61,8 @@ const KNOWN_COMPETITORS = [
 
 export function analyzeCitations(
   responseText: string,
-  rawCitationUrls: string[] = []
+  rawCitationUrls: string[] = [],
+  client?: Partial<ClientConfig>
 ): CitationAnalysis {
   const urlRegex = /(https?:\/\/[^\s\)"'<>\]]+)/gi;
   const inlineUrls: string[] = [];
@@ -81,17 +84,30 @@ export function analyzeCitations(
   }
 
   const citedDomains = Array.from(domainsSet);
-  const kidsddsCited = citedDomains.some(d => d.includes('kidsdds.com'));
+  const targetDomain = (client?.domain || 'kidsdds.com').replace(/^https?:\/\//, '').replace(/^www\./, '').toLowerCase();
+  const clientCited = Boolean(targetDomain && citedDomains.some(d => d.includes(targetDomain)));
 
   // Competitor extraction from response text
   const extractedCompetitors: string[] = [];
   const textLower = (responseText || '').toLowerCase();
 
-  for (const comp of KNOWN_COMPETITORS) {
-    if (textLower.includes(comp.toLowerCase())) {
+  const knownCompetitors =
+    client?.knownCompetitors && client.knownCompetitors.length > 0
+      ? client.knownCompetitors
+      : (!client || client.id === 'kids-dentist' ? DEFAULT_KNOWN_COMPETITORS : []);
+
+  for (const comp of knownCompetitors) {
+    if (comp && textLower.includes(comp.toLowerCase())) {
       extractedCompetitors.push(comp);
     }
   }
+
+  const excludeAliases = (
+    client?.brandAliases && client.brandAliases.length > 0
+      ? client.brandAliases
+      : ['kids dentist', 'kids dds']
+  ).map(a => a.toLowerCase());
+  if (client?.name) excludeAliases.push(client.name.toLowerCase());
 
   // Also parse numbered/bulleted list titles if present
   const lines = (responseText || '').split(/\r?\n/);
@@ -99,11 +115,11 @@ export function analyzeCitations(
     const listMatch = line.match(/^(?:(?:\d+[.)])|[-*•#+])\s+\*\*([^*]+)\*\*/);
     if (listMatch) {
       const candidateName = listMatch[1].trim();
+      const candLower = candidateName.toLowerCase();
       if (
         candidateName.length > 3 &&
         candidateName.length < 50 &&
-        !candidateName.toLowerCase().includes('kids dentist') &&
-        !candidateName.toLowerCase().includes('kids dds') &&
+        !excludeAliases.some(alias => candLower.includes(alias)) &&
         !extractedCompetitors.includes(candidateName)
       ) {
         extractedCompetitors.push(candidateName);
@@ -112,7 +128,8 @@ export function analyzeCitations(
   }
 
   return {
-    kidsddsCited,
+    kidsddsCited: clientCited,
+    clientCited,
     citedDomains,
     citedUrls: allUrls,
     competitors: Array.from(new Set(extractedCompetitors))
@@ -137,6 +154,5 @@ export function classifyRefusal(text: string): boolean {
     "please check google reviews or yelp"
   ];
 
-  // If text is short and contains refusal phrase, or opens with one
   return refusalPhrases.some(phrase => lower.includes(phrase));
 }

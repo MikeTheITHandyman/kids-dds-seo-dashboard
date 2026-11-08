@@ -7,13 +7,22 @@ import { acquireRunLock, releaseRunLock } from '@/lib/ai-harness/lock';
 import { HarnessRow, computeHash, saveRunOutputs } from '@/lib/ai-harness/export';
 import {
   getLLMBudgetConfig,
+  saveLLMBudgetConfig,
   getLastRunDate,
   checkScheduleEligibility,
   loadQuestionStateMap,
   saveQuestionStateMap,
   selectNextQuestionsForRun,
-  calculateCarryForwardScores
+  calculateCarryForwardScores,
+  buildWhyNotMentionedPrompt,
 } from '@/lib/ai-harness/settings';
+import {
+  DEFAULT_CLIENT_ID,
+  getActiveClientId,
+  getClientConfig,
+  getScopedDocId,
+  saveClientConfig,
+} from '@/lib/clients';
 
 export const maxDuration = 60; // 60 seconds serverless maximum
 
@@ -27,23 +36,28 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const isDryRun = searchParams.get('dryRun') === 'true';
   const isForceRun = searchParams.get('force') === 'true';
+  const requestedClientId = searchParams.get('clientId');
+
+  const clientId = await getActiveClientId(requestedClientId);
+  const client = await getClientConfig(clientId);
 
   const startTime = new Date();
   const dateStr = startTime.toISOString().split('T')[0];
 
   // 0. Check frequency & budget schedule BEFORE preflight so off-days spend 0 API credits
-  const budgetConfig = await getLLMBudgetConfig();
+  const budgetConfig = await getLLMBudgetConfig(clientId);
   if (!isDryRun && !isForceRun) {
-    const lastRunDate = await getLastRunDate();
+    const lastRunDate = await getLastRunDate(clientId);
     const scheduleCheck = checkScheduleEligibility(budgetConfig, lastRunDate, dateStr);
     if (!scheduleCheck.shouldRun) {
       return NextResponse.json({
         success: true,
         skipped: true,
+        clientId,
         date: dateStr,
         preset: budgetConfig.preset,
         frequency: budgetConfig.frequency,
-        reason: scheduleCheck.reason
+        reason: scheduleCheck.reason,
       });
     }
   }
@@ -51,10 +65,13 @@ export async function GET(request: Request) {
   // Acquire concurrency lock
   const lock = await acquireRunLock();
   if (!lock.acquired) {
-    return NextResponse.json({
-      error: 'Harness run currently active',
-      reason: lock.reason
-    }, { status: 429 });
+    return NextResponse.json(
+      {
+        error: 'Harness run currently active',
+        reason: lock.reason,
+      },
+      { status: 429 }
+    );
   }
 
   try {
@@ -63,22 +80,26 @@ export async function GET(request: Request) {
     const activeEngines = preflight.activeEngines;
 
     if (activeEngines.length === 0) {
-      return NextResponse.json({
-        success: false,
-        error: 'No active AI search engines passed preflight',
-        abortedEngines: preflight.abortedEngines,
-        alertMessage: preflight.alertMessage
-      }, { status: 502 });
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'No active AI search engines passed preflight',
+          abortedEngines: preflight.abortedEngines,
+          alertMessage: preflight.alertMessage,
+        },
+        { status: 502 }
+      );
     }
 
-    // 2. Load rolling question state & select rotated questions (skipping mastered unless >30d old)
-    const stateMap = await loadQuestionStateMap();
-    const { selected: tasks, skippedMasteredCount, recheckedMasteredCount } = selectNextQuestionsForRun(
-      budgetConfig,
-      stateMap,
-      dateStr,
-      isDryRun
-    );
+    // 2. Load rolling question state & select rotated questions
+    const stateMap = await loadQuestionStateMap(clientId);
+    const {
+      selected: tasks,
+      skippedMasteredCount,
+      recheckedMasteredCount,
+      nextRegionIndex,
+      primaryRegionTested,
+    } = selectNextQuestionsForRun(budgetConfig, stateMap, dateStr, isDryRun, client);
 
     const selectedCommunities = Array.from(new Set(tasks.map(t => t.location)));
 
@@ -109,13 +130,14 @@ export async function GET(request: Request) {
           topicId: task.topicId,
           topic: task.topicName,
           prompt: task.prompt,
-          engines: {}
+          isRegional: task.isRegional,
+          engines: {},
         };
         const rowsForTask: HarnessRow[] = [];
 
         // Run all active engines concurrently for this prompt
         await Promise.all(
-          activeEngines.map(async (engine) => {
+          activeEngines.map(async engine => {
             // Slight stagger for Gemini rate-limits
             if (engine.name === 'Gemini' && taskIdx > 0) {
               await new Promise(r => setTimeout(r, (taskIdx % 4) * 200));
@@ -133,7 +155,7 @@ export async function GET(request: Request) {
                 responseText: '',
                 rawCitations: [],
                 latencyMs: 0,
-                errorMessage: err?.message || String(err)
+                errorMessage: err?.message || String(err),
               };
             }
 
@@ -145,11 +167,30 @@ export async function GET(request: Request) {
               engineFailures[engine.name] = (engineFailures[engine.name] || 0) + 1;
             }
 
-            const detection = detectBrandMention(responseText);
-            const citationData = analyzeCitations(responseText, queryResult.rawCitations);
+            const detection = detectBrandMention(responseText, client);
+            const citationData = analyzeCitations(responseText, queryResult.rawCitations, client);
 
             if (detection.isMentioned) {
               engineSuccesses[engine.name] = (engineSuccesses[engine.name] || 0) + 1;
+            }
+
+            // Optional Automatic Follow-up when Not Mentioned
+            let followUpResponse = '';
+            if (
+              budgetConfig.autoFollowUpNotMentioned &&
+              status === 'ok' &&
+              !detection.isMentioned &&
+              responseText.trim().length > 0
+            ) {
+              try {
+                const followUpPrompt = buildWhyNotMentionedPrompt(task.prompt, responseText, client);
+                const fuRes = await engine.query(followUpPrompt, 15000);
+                if (fuRes.responseText) {
+                  followUpResponse = fuRes.responseText;
+                }
+              } catch {
+                // Non-fatal if follow-up times out
+              }
             }
 
             const row: HarnessRow = {
@@ -159,17 +200,17 @@ export async function GET(request: Request) {
               prompt_id: task.topicId,
               topic: task.topicName,
               location: task.location,
-              language: "en",
-              phrasing: "explicit",
+              language: 'en',
+              phrasing: 'explicit',
               run_idx: 1,
               status,
               mention_class: detection.mentionClass,
               list_position: detection.listPosition === null ? '' : detection.listPosition,
-              kidsdds_cited: citationData.kidsddsCited,
+              kidsdds_cited: citationData.clientCited,
               cited_domains: citationData.citedDomains.join('; '),
               competitors: citationData.competitors.join('; '),
               response_text: responseText,
-              response_hash: computeHash(responseText)
+              response_hash: computeHash(responseText),
             };
             rowsForTask.push(row);
 
@@ -179,21 +220,26 @@ export async function GET(request: Request) {
               mentioned: detection.isMentioned,
               mentionClass: detection.mentionClass,
               listPosition: detection.listPosition,
-              kidsddsCited: citationData.kidsddsCited
+              kidsddsCited: citationData.clientCited,
+              followUp: followUpResponse || undefined,
             };
 
             if (engine.name === 'OpenAI') {
               taskLog.chatgptResponse = responseText;
               taskLog.chatgptMentioned = detection.isMentioned;
+              if (followUpResponse) taskLog.chatgptFollowUp = followUpResponse;
             } else if (engine.name === 'Claude') {
               taskLog.claudeResponse = responseText;
               taskLog.claudeMentioned = detection.isMentioned;
+              if (followUpResponse) taskLog.claudeFollowUp = followUpResponse;
             } else if (engine.name === 'Gemini') {
               taskLog.geminiResponse = responseText;
               taskLog.geminiMentioned = detection.isMentioned;
+              if (followUpResponse) taskLog.geminiFollowUp = followUpResponse;
             } else if (engine.name === 'Perplexity') {
               taskLog.perplexityResponse = responseText;
               taskLog.perplexityMentioned = detection.isMentioned;
+              if (followUpResponse) taskLog.perplexityFollowUp = followUpResponse;
             }
           })
         );
@@ -215,9 +261,15 @@ export async function GET(request: Request) {
       // Only update rolling state if at least one engine succeeded cleanly
       if (gptOk || claudeOk || geminiOk) {
         const prev = stateMap[tLog.key];
-        const chatgptMentioned = gptOk ? Boolean(tLog.chatgptMentioned) : Boolean(prev?.chatgptMentioned);
-        const claudeMentioned = claudeOk ? Boolean(tLog.claudeMentioned) : Boolean(prev?.claudeMentioned);
-        const geminiMentioned = geminiOk ? Boolean(tLog.geminiMentioned) : Boolean(prev?.geminiMentioned);
+        const chatgptMentioned = gptOk
+          ? Boolean(tLog.chatgptMentioned)
+          : Boolean(prev?.chatgptMentioned);
+        const claudeMentioned = claudeOk
+          ? Boolean(tLog.claudeMentioned)
+          : Boolean(prev?.claudeMentioned);
+        const geminiMentioned = geminiOk
+          ? Boolean(tLog.geminiMentioned)
+          : Boolean(prev?.geminiMentioned);
 
         stateMap[tLog.key] = {
           key: tLog.key,
@@ -229,36 +281,52 @@ export async function GET(request: Request) {
           chatgptMentioned,
           claudeMentioned,
           geminiMentioned,
-          mastered: chatgptMentioned && claudeMentioned && geminiMentioned
+          mastered: chatgptMentioned && claudeMentioned && geminiMentioned,
         };
       }
     }
 
     if (!isDryRun) {
-      await saveQuestionStateMap(stateMap);
+      await saveQuestionStateMap(stateMap, clientId);
+      // Advance regional rotation pointer for the next run
+      await saveLLMBudgetConfig({ currentRegionIndex: nextRegionIndex }, 'cron', clientId);
+      await saveClientConfig(clientId, { currentRegionIndex: nextRegionIndex });
     }
 
     const endTime = new Date();
     const durationMs = endTime.getTime() - startTime.getTime();
 
     // Calculate batch visibility percentages (just the questions asked in this run)
-    const batchChatgptScore = engineTotals['OpenAI'] ? Math.round(((engineSuccesses['OpenAI'] || 0) / engineTotals['OpenAI']) * 100) : 0;
-    const batchClaudeScore = engineTotals['Claude'] ? Math.round(((engineSuccesses['Claude'] || 0) / engineTotals['Claude']) * 100) : 0;
-    const batchGeminiScore = engineTotals['Gemini'] ? Math.round(((engineSuccesses['Gemini'] || 0) / engineTotals['Gemini']) * 100) : 0;
-    const perplexityScore = engineTotals['Perplexity'] ? Math.round(((engineSuccesses['Perplexity'] || 0) / engineTotals['Perplexity']) * 100) : 0;
+    const batchChatgptScore = engineTotals['OpenAI']
+      ? Math.round(((engineSuccesses['OpenAI'] || 0) / engineTotals['OpenAI']) * 100)
+      : 0;
+    const batchClaudeScore = engineTotals['Claude']
+      ? Math.round(((engineSuccesses['Claude'] || 0) / engineTotals['Claude']) * 100)
+      : 0;
+    const batchGeminiScore = engineTotals['Gemini']
+      ? Math.round(((engineSuccesses['Gemini'] || 0) / engineTotals['Gemini']) * 100)
+      : 0;
+    const perplexityScore = engineTotals['Perplexity']
+      ? Math.round(((engineSuccesses['Perplexity'] || 0) / engineTotals['Perplexity']) * 100)
+      : 0;
 
-    // Calculate rolling carry-forward visibility scores across all tracked questions (including skipped Mastered ones)
+    // Calculate rolling carry-forward visibility scores across all tracked questions
     const rolling = calculateCarryForwardScores(stateMap);
-    const chatgptScore = rolling.totalTrackedQuestions > 0 ? rolling.chatgptScore : batchChatgptScore;
-    const claudeScore = rolling.totalTrackedQuestions > 0 ? rolling.claudeScore : batchClaudeScore;
-    const geminiScore = rolling.totalTrackedQuestions > 0 ? rolling.geminiScore : batchGeminiScore;
+    const chatgptScore =
+      rolling.totalTrackedQuestions > 0 ? rolling.chatgptScore : batchChatgptScore;
+    const claudeScore =
+      rolling.totalTrackedQuestions > 0 ? rolling.claudeScore : batchClaudeScore;
+    const geminiScore =
+      rolling.totalTrackedQuestions > 0 ? rolling.geminiScore : batchGeminiScore;
 
     // Check failure rates per engine: only report critical error if > 20% fail
     for (const [engName, failedCount] of Object.entries(engineFailures)) {
       const totalCount = engineTotals[engName] || 1;
       const failRatio = failedCount / totalCount;
-      if (failRatio > 0.20) {
-        criticalErrors.push(`${engName}: ${failedCount}/${totalCount} calls failed (${Math.round(failRatio * 100)}% > 20% threshold)`);
+      if (failRatio > 0.2) {
+        criticalErrors.push(
+          `${engName}: ${failedCount}/${totalCount} calls failed (${Math.round(failRatio * 100)}% > 20% threshold)`
+        );
       }
     }
 
@@ -268,6 +336,7 @@ export async function GET(request: Request) {
     if (adminDb && adminDb.collection && !isDryRun) {
       try {
         await adminDb.collection('cron_logs').add({
+          clientId,
           date: dateStr,
           startTime,
           endTime,
@@ -278,6 +347,8 @@ export async function GET(request: Request) {
           questions_rechecked_mastered: recheckedMasteredCount,
           total_tracked_questions: rolling.totalTrackedQuestions,
           mastered_questions_count: rolling.masteredQuestionsCount,
+          primary_region_tested: primaryRegionTested,
+          next_region_index: nextRegionIndex,
           communities_tested: selectedCommunities,
           chatgpt_score: chatgptScore,
           claude_score: claudeScore,
@@ -286,15 +357,17 @@ export async function GET(request: Request) {
           batch_scores: {
             chatgpt: batchChatgptScore,
             claude: batchClaudeScore,
-            gemini: batchGeminiScore
+            gemini: batchGeminiScore,
           },
           engineTotals,
           engineSuccesses,
           criticalErrors,
-          logs: dashboardLogs
+          logs: dashboardLogs,
         });
 
-        await adminDb.collection('llm_visibility').doc(dateStr).set({
+        const visDocId = getScopedDocId(dateStr, clientId);
+        await adminDb.collection('llm_visibility').doc(visDocId).set({
+          clientId,
           date: dateStr,
           chatgpt_score: chatgptScore,
           claude_score: claudeScore,
@@ -303,46 +376,52 @@ export async function GET(request: Request) {
           communities_tested: selectedCommunities,
           questions_asked: tasks.length,
           questions_skipped_mastered: skippedMasteredCount,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        await adminDb.collection('system_alerts').doc('latest_cron_alert').set({
+        await adminDb.collection('system_alerts').doc(getScopedDocId('latest_cron_alert', clientId)).set({
+          clientId,
           date: dateStr,
           timestamp: new Date(),
           resolved: criticalErrors.length === 0,
-          issues: criticalErrors
+          issues: criticalErrors,
         });
       } catch (fbErr) {
-        console.error("Firestore persistence error:", fbErr);
+        console.error('Firestore persistence error:', fbErr);
       }
     }
 
     const hasCriticalIssues = criticalErrors.length > 0;
-    return NextResponse.json({
-      success: !hasCriticalIssues,
-      date: dateStr,
-      durationMs,
-      budgetPreset: budgetConfig.preset,
-      questionsAsked: tasks.length,
-      skippedMasteredCount,
-      recheckedMasteredCount,
-      totalTrackedQuestions: rolling.totalTrackedQuestions,
-      masteredQuestionsCount: rolling.masteredQuestionsCount,
-      scores: {
-        chatgpt: chatgptScore,
-        claude: claudeScore,
-        gemini: geminiScore,
-        perplexity: perplexityScore
+    return NextResponse.json(
+      {
+        success: !hasCriticalIssues,
+        clientId,
+        date: dateStr,
+        durationMs,
+        budgetPreset: budgetConfig.preset,
+        questionsAsked: tasks.length,
+        skippedMasteredCount,
+        recheckedMasteredCount,
+        totalTrackedQuestions: rolling.totalTrackedQuestions,
+        masteredQuestionsCount: rolling.masteredQuestionsCount,
+        primaryRegionTested,
+        nextRegionIndex,
+        scores: {
+          chatgpt: chatgptScore,
+          claude: claudeScore,
+          gemini: geminiScore,
+          perplexity: perplexityScore,
+        },
+        batchScores: {
+          chatgpt: batchChatgptScore,
+          claude: batchClaudeScore,
+          gemini: batchGeminiScore,
+        },
+        criticalErrors,
+        tested: selectedCommunities,
       },
-      batchScores: {
-        chatgpt: batchChatgptScore,
-        claude: batchClaudeScore,
-        gemini: batchGeminiScore
-      },
-      criticalErrors,
-      tested: selectedCommunities
-    }, { status: hasCriticalIssues ? 502 : 200 });
-
+      { status: hasCriticalIssues ? 502 : 200 }
+    );
   } finally {
     await releaseRunLock();
   }
