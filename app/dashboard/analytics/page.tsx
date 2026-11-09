@@ -96,6 +96,7 @@ export default async function WebAnalytics({
     avgEngagementRate: '0%',
   };
   const exportPrefix = activeClient.name.replace(/[^a-zA-Z0-9]+/g, '_');
+  const serviceAccountEmail = process.env.FIREBASE_CLIENT_EMAIL || '';
 
   return (
     <div id="dashboard-content" className="space-y-4 sm:space-y-6">
@@ -115,6 +116,24 @@ export default async function WebAnalytics({
           <ExportControls data={timeSeriesData} filename={`${exportPrefix}_Web_Analytics`} />
         </div>
       </div>
+
+      {ga4Result.error && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs sm:text-sm text-amber-900 space-y-1">
+          <div className="font-bold">
+            Google Analytics 4 Connection Notice (Property ID: {propertyId || 'None'})
+          </div>
+          <p className="text-amber-800">{ga4Result.error}</p>
+          {serviceAccountEmail && (
+            <p className="text-amber-800 pt-1">
+              Make sure <strong>Viewer</strong> access is granted in{' '}
+              <strong>GA4 → Admin → Property → Property access management</strong> to:{' '}
+              <code className="bg-white px-1.5 py-0.5 rounded border border-amber-300 font-mono text-[11px]">
+                {serviceAccountEmail}
+              </code>
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-6">
         <StatCard title="Unique Users" value={formatNum(totals.users)} change={0} />
